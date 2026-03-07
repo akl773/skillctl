@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// Version is the application version, set at build time or defaulted.
-const Version = "0.1.0"
+// Version is the application version, injected at build time via -ldflags.
+var Version = "0.1.0"
 
 // DefaultSourceRepo is the default path to the skills source repository.
 var DefaultSourceRepo = filepath.Join(homeDir(), ".skills-curated")

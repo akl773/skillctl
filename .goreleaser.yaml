@@ -1,0 +1,49 @@
+version: 2
+project_name: skillctl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/skillctl
+    binary: skillctl
+    ldflags:
+      - -s -w -X akhilsingh.in/skillctl/internal/config.Version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: akl773
+      name: homebrew-skillctl
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/akl773/skillctl"
+    description: "Interactive TUI for managing curated AI skills across agent folders"
+    license: "MIT"
+    install: |
+      bin.install "skillctl"
+    test: |
+      system "#{bin}/skillctl", "--version"
