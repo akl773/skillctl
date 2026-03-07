@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"akhilsingh.in/skillctl/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,7 +76,7 @@ func TestResolveCommand(t *testing.T) {
 	}{
 		{name: "exact name with slash", raw: "/help", wantName: "help", wantArgs: "", wantOK: true},
 		{name: "exact name without slash", raw: "help", wantName: "help", wantArgs: "", wantOK: true},
-		{name: "name with args", raw: "/help add", wantName: "help", wantArgs: "add", wantOK: true},
+		{name: "name with args", raw: "/help skills", wantName: "help", wantArgs: "skills", wantOK: true},
 		{name: "multi word command uses longest match", raw: "/list toggle 2", wantName: "list toggle", wantArgs: "2", wantOK: true},
 		{name: "multi word alias", raw: "/toggle alpha", wantName: "list toggle", wantArgs: "alpha", wantOK: true},
 		{name: "alias with args", raw: "/up now", wantName: "pull", wantArgs: "now", wantOK: true},
@@ -153,6 +154,16 @@ func TestBuiltInCommands(t *testing.T) {
 	clearCmd, ok := findCommandByAlias(commands, "clear")
 	require.True(t, ok)
 	assert.Equal(t, "clear", clearCmd.Name)
+
+	skillsCmd, ok := findCommandByAlias(commands, "skills")
+	require.True(t, ok)
+	assert.Equal(t, "skills", skillsCmd.Name)
+
+	_, ok = findCommandByAlias(commands, "add")
+	assert.False(t, ok)
+
+	_, ok = findCommandByAlias(commands, "remove")
+	assert.False(t, ok)
 }
 
 func TestResolveBuiltInRepoCommands(t *testing.T) {
@@ -172,6 +183,30 @@ func TestResolveBuiltInRepoCommands(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "repos", cmd.Name)
 	assert.Equal(t, "", args)
+}
+
+func TestResolveBuiltInSkillsAliasRunsToggleAction(t *testing.T) {
+	commands := builtInCommands()
+
+	cmd, args, ok := resolveCommand(commands, "/sk 2,repo/alpha")
+	require.True(t, ok)
+	assert.Equal(t, "skills", cmd.Name)
+	assert.Equal(t, "2,repo/alpha", args)
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := Model{
+		paths:        paths,
+		cfg:          config.Config{SelectedSkills: []string{"repo/alpha"}},
+		availableIDs: []string{"repo/alpha", "repo/beta"},
+	}
+
+	result := cmd.Run(&m, args)
+	assert.False(t, result.KeepInput)
+	assert.Contains(t, result.Output, "Added:")
+	assert.Contains(t, result.Output, "repo/beta")
+	assert.Contains(t, result.Output, "Removed from selection:")
+	assert.Contains(t, result.Output, "repo/alpha")
+	assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
 }
 
 func testCommandDefs() []commandDef {

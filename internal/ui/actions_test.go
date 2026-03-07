@@ -50,3 +50,48 @@ func TestMatchAvailableSkills(t *testing.T) {
 		assert.Equal(t, "repo/react-best-practices", matches[0].Skill.ID)
 	})
 }
+
+func TestActionToggleSkillSelection(t *testing.T) {
+	t.Run("toggles add/remove for mixed inputs", func(t *testing.T) {
+		paths := config.ResolvePaths(t.TempDir())
+		m := Model{
+			paths: paths,
+			cfg: config.Config{
+				SelectedSkills: []string{"repo/alpha"},
+			},
+			availableIDs: []string{"repo/alpha", "repo/beta", "repo/gamma"},
+		}
+
+		output := m.actionToggleSkillSelection("2,repo/alpha,repo/missing")
+
+		assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
+		assert.Contains(t, output, "Added:")
+		assert.Contains(t, output, "repo/beta")
+		assert.Contains(t, output, "Not found:")
+		assert.Contains(t, output, "repo/missing")
+		assert.Contains(t, output, "Removed from selection:")
+		assert.Contains(t, output, "repo/alpha")
+
+		assert.FileExists(t, paths.ConfigPath)
+		saved := config.LoadConfig(paths)
+		assert.Equal(t, []string{"repo/beta"}, saved.SelectedSkills)
+	})
+
+	t.Run("reports invalid indexes while applying valid toggles", func(t *testing.T) {
+		paths := config.ResolvePaths(t.TempDir())
+		m := Model{
+			paths: paths,
+			cfg: config.Config{
+				SelectedSkills: []string{"repo/alpha"},
+			},
+			availableIDs: []string{"repo/alpha", "repo/beta"},
+		}
+
+		output := m.actionToggleSkillSelection("4,1")
+
+		assert.Empty(t, m.cfg.SelectedSkills)
+		assert.Contains(t, output, "Invalid catalog number(s): 4")
+		assert.Contains(t, output, "Removed from selection:")
+		assert.Contains(t, output, "repo/alpha")
+	})
+}

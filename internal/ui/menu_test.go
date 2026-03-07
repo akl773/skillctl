@@ -128,3 +128,57 @@ func TestUpdateAutoGitPullNoopWithoutRepos(t *testing.T) {
 	assert.Empty(t, updated.chatMessages)
 	assert.Equal(t, -1, updated.gitPullMessageID)
 }
+
+func TestToggleSkillPickerSelectionTracksPendingState(t *testing.T) {
+	m := Model{
+		skillMatches: []skillMatch{
+			{Skill: config.AvailableSkill{ID: "repo/alpha"}, Selected: false},
+			{Skill: config.AvailableSkill{ID: "repo/beta"}, Selected: true},
+		},
+		skillPickerSelections: map[string]bool{},
+	}
+
+	m.skillCursor = 0
+	m.toggleSkillPickerSelection()
+	assert.Equal(t, map[string]bool{"repo/alpha": true}, m.skillPickerSelections)
+
+	m.toggleSkillPickerSelection()
+	assert.Empty(t, m.skillPickerSelections)
+
+	m.skillCursor = 1
+	m.toggleSkillPickerSelection()
+	assert.Equal(t, map[string]bool{"repo/beta": false}, m.skillPickerSelections)
+
+	m.toggleSkillPickerSelection()
+	assert.Empty(t, m.skillPickerSelections)
+}
+
+func TestApplySkillPickerSelectionsAppliesAddAndRemove(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.cfg = config.Config{SelectedSkills: []string{"repo/alpha"}}
+	m.available = []config.AvailableSkill{
+		{ID: "repo/alpha", Name: "alpha", RepoID: "repo"},
+		{ID: "repo/beta", Name: "beta", RepoID: "repo"},
+	}
+	m.availableIDs = []string{"repo/alpha", "repo/beta"}
+	m.skillPickerOpen = true
+	m.skillPickerSelections = map[string]bool{
+		"repo/alpha": false,
+		"repo/beta":  true,
+	}
+
+	m.applySkillPickerSelections()
+
+	assert.False(t, m.skillPickerOpen)
+	assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
+	require.NotEmpty(t, m.chatMessages)
+	output := m.chatMessages[len(m.chatMessages)-1].Content
+	assert.Contains(t, output, "Added:")
+	assert.Contains(t, output, "repo/beta")
+	assert.Contains(t, output, "Removed from selection:")
+	assert.Contains(t, output, "repo/alpha")
+
+	saved := config.LoadConfig(paths)
+	assert.Equal(t, []string{"repo/beta"}, saved.SelectedSkills)
+}
