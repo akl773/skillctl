@@ -1,4 +1,4 @@
-.PHONY: build run clean install
+.PHONY: build run clean install test cover
 
 BINARY  := skillctl
 PKG     := ./cmd/skillctl
@@ -16,3 +16,10 @@ clean:
 
 install:
 	go install -ldflags "$(LDFLAGS)" $(PKG)
+
+test:
+	go test ./... -v -count=1
+
+cover:
+	go test ./... -coverprofile=coverage.out -count=1
+	go tool cover -func=coverage.out
