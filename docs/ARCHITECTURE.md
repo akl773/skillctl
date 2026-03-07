@@ -107,6 +107,19 @@ UI remains intentionally thin: parse input, call `core`, render outcomes.
 - `rsync` command for target synchronization
 - Filesystem reads/writes via `os` and `filepath`
 
+## Release and Versioning
+
+Project deployment is handled by GitHub Actions and GoReleaser.
+
+- Release workflow: `.github/workflows/release.yml`
+- Trigger: push tags matching `v*`
+- Version source: the pushed git tag (for example, `v1.2.3`)
+- Build injection: GoReleaser passes `{{ .Version }}` into
+  `internal/config.Version` via linker flags
+
+Implication: published binary versions are controlled by git tags, not by a
+manually maintained version value in the workflow.
+
 Because these boundaries are concrete, pure logic is prioritized for unit tests,
 while command-execution paths are better covered by integration tests.
 
