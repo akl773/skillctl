@@ -25,7 +25,6 @@ func TestScoreCommand(t *testing.T) {
 		{name: "exact alias", query: "ls", cmd: commands[1], wantScore: 3, wantOK: true},
 		{name: "alias with args", query: "ls all", cmd: commands[1], wantScore: 4, wantOK: true},
 		{name: "alias prefix", query: "up", cmd: commands[2], wantScore: 5, wantOK: true},
-		{name: "alias prefix wins before name contains", query: "tog", cmd: commands[3], wantScore: 5, wantOK: true},
 		{name: "alias contains", query: "dat", cmd: commands[2], wantScore: 7, wantOK: true},
 		{name: "description contains", query: "latest", cmd: commands[2], wantScore: 8, wantOK: true},
 		{name: "no match", query: "zzz", cmd: commands[0], wantScore: 0, wantOK: false},
@@ -47,8 +46,8 @@ func TestMatchCommands(t *testing.T) {
 		matches := matchCommands(commands, "")
 		require.Len(t, matches, len(commands))
 
-		names := []string{matches[0].Command.Name, matches[1].Command.Name, matches[2].Command.Name, matches[3].Command.Name}
-		assert.Equal(t, []string{"help", "list", "list toggle", "pull"}, names)
+		names := []string{matches[0].Command.Name, matches[1].Command.Name, matches[2].Command.Name}
+		assert.Equal(t, []string{"help", "list", "pull"}, names)
 	})
 
 	t.Run("sorts by score then name", func(t *testing.T) {
@@ -77,8 +76,6 @@ func TestResolveCommand(t *testing.T) {
 		{name: "exact name with slash", raw: "/help", wantName: "help", wantArgs: "", wantOK: true},
 		{name: "exact name without slash", raw: "help", wantName: "help", wantArgs: "", wantOK: true},
 		{name: "name with args", raw: "/help skills", wantName: "help", wantArgs: "skills", wantOK: true},
-		{name: "multi word command uses longest match", raw: "/list toggle 2", wantName: "list toggle", wantArgs: "2", wantOK: true},
-		{name: "multi word alias", raw: "/toggle alpha", wantName: "list toggle", wantArgs: "alpha", wantOK: true},
 		{name: "alias with args", raw: "/up now", wantName: "pull", wantArgs: "now", wantOK: true},
 		{name: "unknown command", raw: "/unknown", wantName: "", wantArgs: "", wantOK: false},
 		{name: "empty command", raw: "/", wantName: "", wantArgs: "", wantOK: false},
@@ -102,10 +99,6 @@ func TestFindCommandByAlias(t *testing.T) {
 	cmd, ok := findCommandByAlias(commands, "LS")
 	require.True(t, ok)
 	assert.Equal(t, "list", cmd.Name)
-
-	cmd, ok = findCommandByAlias(commands, "toggle")
-	require.True(t, ok)
-	assert.Equal(t, "list toggle", cmd.Name)
 
 	_, ok = findCommandByAlias(commands, "nope")
 	assert.False(t, ok)
@@ -150,10 +143,6 @@ func TestBuiltInCommands(t *testing.T) {
 			seenAliases[alias] = true
 		}
 	}
-
-	clearCmd, ok := findCommandByAlias(commands, "clear")
-	require.True(t, ok)
-	assert.Equal(t, "clear", clearCmd.Name)
 
 	skillsCmd, ok := findCommandByAlias(commands, "skills")
 	require.True(t, ok)
@@ -228,12 +217,6 @@ func testCommandDefs() []commandDef {
 			Aliases:     []string{"update", "up"},
 			Description: "Pull latest changes",
 			Usage:       "/pull",
-		},
-		{
-			Name:        "list toggle",
-			Aliases:     []string{"toggle", "lt"},
-			Description: "Toggle selected skill",
-			Usage:       "/list toggle <skill>",
 		},
 	}
 }

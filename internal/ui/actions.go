@@ -71,58 +71,9 @@ func (m *Model) actionListSelected() string {
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
 	sb.WriteString(infoStyle.Render(fmt.Sprintf("📌 total: %d (disabled: %d)", len(m.cfg.SelectedSkills), disabledCount)))
 	sb.WriteString("\n")
-	sb.WriteString(mutedStyle.Render("ℹ️ /list toggle <index|name> to enable or disable a skill."))
+	sb.WriteString(mutedStyle.Render("ℹ️ Use /skills <index|name> to add or remove skills."))
 
 	return sb.String()
-}
-
-func (m *Model) actionToggleSkill(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return errorStyle.Render("Usage: /list toggle <index|name>")
-	}
-
-	if len(m.cfg.SelectedSkills) == 0 {
-		return warnStyle.Render("No skills selected yet.")
-	}
-
-	requested, invalid := config.SplitByReference([]string{raw}, m.cfg.SelectedSkills)
-	if len(invalid) > 0 {
-		return errorStyle.Render("Invalid selected-skill index.")
-	}
-
-	selectedMap := make(map[string]string)
-	for _, s := range m.cfg.SelectedSkills {
-		selectedMap[strings.ToLower(s)] = s
-	}
-
-	resolved, ok := selectedMap[strings.ToLower(requested[0])]
-	if !ok {
-		return errorStyle.Render("Skill not found in selected list.")
-	}
-
-	idx := -1
-	for i, s := range m.cfg.DisabledSkills {
-		if s == resolved {
-			idx = i
-			break
-		}
-	}
-
-	if idx >= 0 {
-		m.cfg.DisabledSkills = append(m.cfg.DisabledSkills[:idx], m.cfg.DisabledSkills[idx+1:]...)
-		if err := config.SaveConfig(m.paths, m.cfg); err != nil {
-			return errorStyle.Render("Failed to save config: " + err.Error())
-		}
-		return successStyle.Render("Enabled: " + resolved)
-	}
-
-	m.cfg.DisabledSkills = append(m.cfg.DisabledSkills, resolved)
-	m.cfg.DisabledSkills = config.UniqueOrdered(m.cfg.DisabledSkills)
-	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
-		return errorStyle.Render("Failed to save config: " + err.Error())
-	}
-	return warnStyle.Render("Disabled: " + resolved)
 }
 
 func (m *Model) actionSearch(query string) string {
@@ -359,50 +310,6 @@ func scoreFuzzyText(query, text string) (int, bool) {
 	}
 
 	return 10 + gapPenalty, true
-}
-
-func (m *Model) actionAddSkill(raw string) string {
-	tokens := config.InputCSV(raw)
-	if len(tokens) == 0 {
-		return warnStyle.Render("No skill names provided.")
-	}
-
-	requested, invalid := config.SplitByReference(tokens, m.availableIDs)
-
-	var sb strings.Builder
-	if len(invalid) > 0 {
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("Invalid catalog number(s): %s", strings.Join(invalid, ", "))) + "\n\n")
-	}
-
-	outcome := core.AddRequestedSkills(&m.cfg, requested, m.availableIDs)
-	if len(outcome.Added) > 0 {
-		_ = config.SaveConfig(m.paths, m.cfg)
-	}
-	sb.WriteString(formatAddOutcome(outcome))
-
-	return sb.String()
-}
-
-func (m *Model) actionRemoveSkill(raw string) string {
-	tokens := config.InputCSV(raw)
-	if len(tokens) == 0 {
-		return warnStyle.Render("No skill names provided.")
-	}
-
-	requested, invalid := config.SplitByReference(tokens, m.cfg.SelectedSkills)
-
-	var sb strings.Builder
-	if len(invalid) > 0 {
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("Invalid number(s): %s", strings.Join(invalid, ", "))) + "\n\n")
-	}
-
-	outcome := core.RemoveSelectedSkills(&m.cfg, requested)
-	if len(outcome.RemovedFromSelected) > 0 {
-		_ = config.SaveConfig(m.paths, m.cfg)
-	}
-	sb.WriteString(formatRemoveOutcome(outcome))
-
-	return sb.String()
 }
 
 func (m *Model) actionSync() string {

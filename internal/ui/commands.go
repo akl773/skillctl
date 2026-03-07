@@ -11,7 +11,6 @@ import (
 type commandResult struct {
 	Output string
 	Quit   bool
-	Clear  bool
 	Cmd    tea.Cmd
 	// KeepInput keeps the current input field value unchanged after command run.
 	KeepInput bool
@@ -61,20 +60,6 @@ func builtInCommands() []commandDef {
 			Examples:    []string{"/list"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.actionListSelected()}
-			},
-		},
-		{
-			Name:        "list toggle",
-			Aliases:     []string{"toggle", "lt"},
-			Description: "Enable or disable a selected skill",
-			Usage:       "/list toggle <name|index>",
-			Examples:    []string{"/list toggle 2", "/list toggle vercel-labs-agent-skills/react-best-practices", "/toggle 2"},
-			Run: func(m *Model, args string) commandResult {
-				args = strings.TrimSpace(args)
-				if args == "" {
-					return commandResult{Output: errorStyle.Render("Usage: /list toggle <name|index>")}
-				}
-				return commandResult{Output: m.actionToggleSkill(args)}
 			},
 		},
 		{
@@ -200,16 +185,6 @@ func builtInCommands() []commandDef {
 			Examples:    []string{"/status"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.actionStatus()}
-			},
-		},
-		{
-			Name:        "clear",
-			Aliases:     []string{"cls"},
-			Description: "Clear chat history",
-			Usage:       "/clear",
-			Examples:    []string{"/clear"},
-			Run: func(m *Model, args string) commandResult {
-				return commandResult{Output: infoStyle.Render("Conversation cleared."), Clear: true}
 			},
 		},
 		{
