@@ -10,7 +10,6 @@ import (
 	"akhilsingh.in/skillctl/internal/config"
 )
 
-// --- Color palette ---
 var (
 	primary   = lipgloss.Color("#22D3EE")
 	secondary = lipgloss.Color("#93C5FD")
@@ -21,7 +20,6 @@ var (
 	text      = lipgloss.Color("#E2E8F0")
 )
 
-// --- Styles ---
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -84,7 +82,7 @@ func (m Model) renderCommandWorkspace() string {
 	}
 	maxLine := w - 4
 
-	stats := fmt.Sprintf("catalog:%d  selected:%d  targets:%d  repo:%s",
+	stats := fmt.Sprintf("catalog:%d selected:%d targets:%d repo:%s",
 		len(m.available),
 		len(m.cfg.SelectedSkills),
 		len(m.cfg.Targets),
@@ -92,7 +90,7 @@ func (m Model) renderCommandWorkspace() string {
 	)
 	stats = truncateASCII(stats, maxLine)
 
-	b.WriteString(titleStyle.Render(" skillctl // slash command center ") + "\n")
+	b.WriteString(titleStyle.Render(" skillctl // command mode ") + "\n")
 	b.WriteString(subtitleStyle.Render(" "+stats) + "\n")
 	b.WriteString(headerDivider.Render(strings.Repeat("-", min(maxLine, 92))) + "\n\n")
 
@@ -103,7 +101,21 @@ func (m Model) renderCommandWorkspace() string {
 	visible := m.visibleMatches()
 	if m.paletteOpen() && len(visible) > 0 {
 		b.WriteString(paletteHeaderStyle.Render(" matching commands") + "\n")
-		for i, match := range visible {
+
+		paletteMaxItems := maxPaletteItems
+		if m.height > 0 {
+			paletteMaxItems = m.height - 8
+			if paletteMaxItems > maxPaletteItems {
+				paletteMaxItems = maxPaletteItems
+			}
+			if paletteMaxItems < 4 {
+				paletteMaxItems = 4
+			}
+		}
+		displayCount := min(len(visible), paletteMaxItems)
+
+		for i := 0; i < displayCount; i++ {
+			match := visible[i]
 			line := fmt.Sprintf(" /%-14s %s", match.Command.Name, match.Command.Description)
 			line = truncateASCII(line, maxLine)
 			if i == m.paletteCursor {
@@ -113,53 +125,43 @@ func (m Model) renderCommandWorkspace() string {
 			}
 		}
 
-		selected := visible[m.paletteCursor].Command
-		usage := truncateASCII(" usage: "+selected.Usage, maxLine)
-		b.WriteString(usageStyle.Render(usage) + "\n")
-		b.WriteString(helpStyle.Render(" type to filter  up/down move  tab autocomplete  enter run  click select") + "\n")
+		if m.paletteCursor >= 0 && m.paletteCursor < len(visible) {
+			selected := visible[m.paletteCursor].Command
+			usage := truncateASCII(" usage: "+selected.Usage, maxLine)
+			b.WriteString(usageStyle.Render(usage) + "\n")
+		}
+		b.WriteString(helpStyle.Render(" type to filter  up/down move  tab autocomplete  enter run  ctrl+c quit"))
 	}
-
-	b.WriteString("\n")
-	b.WriteString(sectionTitleStyle.Render(" output ") + "\n")
-	b.WriteString(m.renderOutputPanel(maxLine) + "\n")
-	b.WriteString(helpStyle.Render("\n /help for command list  ctrl+c quit"))
 
 	return b.String()
 }
 
-func (m Model) renderOutputPanel(maxLine int) string {
-	content := strings.TrimRight(m.output, "\n")
-	if strings.TrimSpace(content) == "" {
-		content = mutedStyle.Render("No output yet. Run /help.")
+func (m Model) renderOutputView() string {
+	var b strings.Builder
+
+	w := m.width
+	if w < 64 {
+		w = 64
+	}
+	maxLine := w - 4
+
+	cmdDisplay := m.lastCommand
+	if cmdDisplay == "" {
+		cmdDisplay = "output"
 	}
 
-	lines := strings.Split(content, "\n")
-	maxLines := 16
-	if m.height > 0 {
-		paletteLines := 0
-		if m.paletteOpen() {
-			paletteLines = 2 + len(m.visibleMatches())
-		}
-		reserved := 10 + paletteLines
-		maxLines = m.height - reserved
-		if maxLines < 6 {
-			maxLines = 6
-		}
-	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-		lines[0] = mutedStyle.Render("...") + " " + lines[0]
-	}
+	b.WriteString(titleStyle.Render(" skillctl // "+cmdDisplay+" ") + "\n")
+	b.WriteString(headerDivider.Render(strings.Repeat("-", min(maxLine, 92))) + "\n")
+	b.WriteString(m.outputViewport.View() + "\n")
+	b.WriteString(helpStyle.Render(" esc or / back  up/down/pgup/pgdn scroll  ctrl+c quit"))
 
-	body := strings.Join(lines, "\n")
-	return resultStyle.Width(min(maxLine, 120)).Render(body)
+	return b.String()
 }
 
 func renderGoodbye(width int) string {
 	return successStyle.Render("Goodbye.") + "\n"
 }
 
-// countDirs counts immediate subdirectories.
 func countDirs(path string) int {
 	entries, err := os.ReadDir(path)
 	if err != nil {

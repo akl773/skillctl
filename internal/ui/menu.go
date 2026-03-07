@@ -4,12 +4,18 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"akhilsingh.in/skillctl/internal/config"
 )
 
 const maxPaletteItems = 24
+
+const (
+	modeCommand = iota
+	modeOutput
+)
 
 // Model is the root bubbletea model.
 type Model struct {
@@ -19,8 +25,11 @@ type Model struct {
 	width     int
 	height    int
 
-	quitting bool
-	output   string
+	quitting       bool
+	output         string
+	mode           int
+	outputViewport viewport.Model
+	lastCommand    string
 
 	commandInput  textinput.Model
 	commands      []commandDef
@@ -42,20 +51,23 @@ func NewModel(paths config.AppPaths) Model {
 	ti.CursorEnd()
 	_ = ti.Focus()
 
+	vp := viewport.New(80, 20)
+
 	m := Model{
-		paths:        paths,
-		cfg:          config.LoadConfig(paths),
-		available:    config.LoadAvailableSkills(paths),
-		output:       infoStyle.Render("Type / to browse commands. Try /help to get started."),
-		commandInput: ti,
-		commands:     builtInCommands(),
-		historyIndex: 0,
+		paths:          paths,
+		cfg:            config.LoadConfig(paths),
+		available:      config.LoadAvailableSkills(paths),
+		output:         infoStyle.Render("Type / to browse commands. Try /help to get started."),
+		mode:           modeCommand,
+		outputViewport: vp,
+		commandInput:   ti,
+		commands:       builtInCommands(),
+		historyIndex:   0,
 	}
 	m.recomputeMatches()
 	return m
 }
 
-// Init is the bubbletea init function.
 func (m Model) Init() tea.Cmd {
 	return tea.WindowSize()
 }
@@ -67,6 +79,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.commandInput.Width = max(24, msg.Width-14)
+		m.outputViewport.Width = msg.Width
+		m.outputViewport.Height = msg.Height - 4
 		return m, nil
 
 	case tea.KeyMsg:
@@ -80,12 +94,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	if key == "ctrl+c" {
+	if msg.String() == "ctrl+c" {
 		m.quitting = true
 		return m, tea.Quit
 	}
+
+	switch m.mode {
+	case modeOutput:
+		return m.handleOutputKey(msg)
+	default:
+		return m.handleCommandKey(msg)
+	}
+}
+
+func (m Model) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "/":
+		m.mode = modeCommand
+		m.commandInput.SetValue("/")
+		m.commandInput.CursorEnd()
+		m.recomputeMatches()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.outputViewport, cmd = m.outputViewport.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
 
 	switch key {
 	case "enter":
@@ -162,7 +199,15 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 	raw := strings.TrimSpace(m.commandInput.Value())
 	if raw == "" || raw == "/" {
+		if m.paletteOpen() && len(m.visibleMatches()) > 0 {
+			m.autocompleteSelected()
+			return m, nil
+		}
 		m.output = m.renderHelp("")
+		m.outputViewport.SetContent(m.output)
+		m.outputViewport.GotoTop()
+		m.lastCommand = "/help"
+		m.mode = modeOutput
 		m.commandInput.SetValue("/")
 		m.commandInput.CursorEnd()
 		m.recomputeMatches()
@@ -186,6 +231,10 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 	result := cmd.Run(&m, args)
 	if strings.TrimSpace(result.Output) != "" {
 		m.output = result.Output
+		m.lastCommand = raw
+		m.outputViewport.SetContent(result.Output)
+		m.outputViewport.GotoTop()
+		m.mode = modeOutput
 	}
 
 	m.commandInput.SetValue("/")
@@ -334,7 +383,12 @@ func (m Model) View() string {
 		return renderGoodbye(m.width)
 	}
 
-	return m.renderCommandWorkspace()
+	switch m.mode {
+	case modeOutput:
+		return m.renderOutputView()
+	default:
+		return m.renderCommandWorkspace()
+	}
 }
 
 // refresh reloads config and available skills.
