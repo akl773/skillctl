@@ -28,7 +28,7 @@ func main() {
 	}
 
 	m := ui.NewModel(paths)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running skillctl: %s\n", err)
