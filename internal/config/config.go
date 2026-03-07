@@ -20,6 +20,7 @@ var defaultRepositoryURLs = []string{
 	"https://github.com/callstackincubator/agent-skills.git",
 	"https://github.com/tech-leads-club/agent-skills.git",
 	"https://github.com/ComposioHQ/awesome-claude-skills.git",
+	"https://github.com/sickn33/antigravity-awesome-skills.git",
 }
 
 // AppPaths holds all resolved filesystem paths used by the application.

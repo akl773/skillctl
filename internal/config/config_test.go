@@ -17,7 +17,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Empty(t, cfg.SelectedSkills)
 	assert.Empty(t, cfg.DisabledSkills)
 	assert.NotEmpty(t, cfg.Targets)
-	assert.GreaterOrEqual(t, len(cfg.Repositories), 4)
+	assert.GreaterOrEqual(t, len(cfg.Repositories), 5)
 
 	repoIDs := make([]string, 0, len(cfg.Repositories))
 	for _, repo := range cfg.Repositories {
@@ -28,6 +28,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Contains(t, repoIDs, "callstackincubator-agent-skills")
 	assert.Contains(t, repoIDs, "tech-leads-club-agent-skills")
 	assert.Contains(t, repoIDs, "composiohq-awesome-claude-skills")
+	assert.Contains(t, repoIDs, "sickn33-antigravity-awesome-skills")
 }
 
 func TestResolvePaths(t *testing.T) {
