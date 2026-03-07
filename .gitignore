@@ -1,5 +1,5 @@
 # Binaries
-skillctl
+/skillctl
 *.exe
 *.exe~
 *.dll
