@@ -45,10 +45,11 @@ type Repository struct {
 
 // Config holds user-selected skills, targets, and configured repositories.
 type Config struct {
-	SelectedSkills []string     `json:"selected_skills"`
-	DisabledSkills []string     `json:"disabled_skills"`
-	Targets        []string     `json:"targets"`
-	Repositories   []Repository `json:"repositories"`
+	SelectedSkills      []string     `json:"selected_skills"`
+	DisabledSkills      []string     `json:"disabled_skills"`
+	Targets             []string     `json:"targets"`
+	Repositories        []Repository `json:"repositories"`
+	RemovedDefaultRepos []string     `json:"removed_default_repos,omitempty"`
 }
 
 // State holds runtime state persisted between sessions.
@@ -176,6 +177,12 @@ func LoadConfig(paths AppPaths) Config {
 
 	cfg.Targets = UniqueOrdered(cleanStrings(cfg.Targets))
 	cfg.Repositories = normalizeRepositories(cfg.Repositories)
+	cfg.RemovedDefaultRepos = normalizeRepoIDs(cfg.RemovedDefaultRepos)
+
+	cfg, migrated := mergeMissingDefaultRepositories(cfg)
+	if migrated {
+		_ = SaveConfig(paths, cfg)
+	}
 
 	return cfg
 }
@@ -481,6 +488,64 @@ func normalizeRepositories(repos []Repository) []Repository {
 	}
 
 	return out
+}
+
+func normalizeRepoIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var out []string
+	seen := make(map[string]bool)
+	for _, id := range ids {
+		normalized := sanitizeRepoID(strings.ToLower(strings.TrimSpace(id)))
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+
+	return out
+}
+
+func mergeMissingDefaultRepositories(cfg Config) (Config, bool) {
+	defaults := DefaultRepositories()
+	if len(defaults) == 0 {
+		return cfg, false
+	}
+
+	removed := make(map[string]bool, len(cfg.RemovedDefaultRepos))
+	for _, id := range cfg.RemovedDefaultRepos {
+		removed[strings.ToLower(id)] = true
+	}
+
+	seenIDs := make(map[string]bool, len(cfg.Repositories))
+	seenURLs := make(map[string]bool, len(cfg.Repositories))
+	for _, repo := range cfg.Repositories {
+		seenIDs[strings.ToLower(repo.ID)] = true
+		seenURLs[strings.ToLower(repo.URL)] = true
+	}
+
+	migrated := false
+	for _, repo := range defaults {
+		idKey := strings.ToLower(repo.ID)
+		urlKey := strings.ToLower(repo.URL)
+		if removed[idKey] || seenIDs[idKey] || seenURLs[urlKey] {
+			continue
+		}
+
+		cfg.Repositories = append(cfg.Repositories, repo)
+		seenIDs[idKey] = true
+		seenURLs[urlKey] = true
+		migrated = true
+	}
+
+	return cfg, migrated
 }
 
 func hasHiddenPathSegment(relPath string) bool {

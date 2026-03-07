@@ -624,6 +624,7 @@ func (m *Model) actionAddRepo(raw string) string {
 	}
 
 	m.cfg.Repositories = append(m.cfg.Repositories, repo)
+	m.cfg.RemovedDefaultRepos = removeStringCaseInsensitive(m.cfg.RemovedDefaultRepos, repo.ID)
 	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
 		return errorStyle.Render("Failed to save config: " + err.Error())
 	}
@@ -671,6 +672,7 @@ func (m *Model) actionRemoveRepo(raw string) string {
 	}
 
 	repo := m.cfg.Repositories[repoIndex]
+	defaultRepoIDs := defaultRepoIDSet()
 
 	kept := make([]config.Repository, 0, len(m.cfg.Repositories)-1)
 	for i, current := range m.cfg.Repositories {
@@ -679,6 +681,9 @@ func (m *Model) actionRemoveRepo(raw string) string {
 		}
 	}
 	m.cfg.Repositories = kept
+	if defaultRepoIDs[strings.ToLower(repo.ID)] {
+		m.cfg.RemovedDefaultRepos = config.UniqueOrdered(append(m.cfg.RemovedDefaultRepos, repo.ID))
+	}
 
 	var removedSelected []string
 	for _, selected := range m.cfg.SelectedSkills {
@@ -707,6 +712,35 @@ func (m *Model) actionRemoveRepo(raw string) string {
 		sb.WriteString(infoStyle.Render(fmt.Sprintf("Removed %d target folder(s).", len(removeOutcome.RemovedPaths))))
 	}
 	return sb.String()
+}
+
+func defaultRepoIDSet() map[string]bool {
+	set := make(map[string]bool)
+	for _, repo := range config.DefaultRepositories() {
+		set[strings.ToLower(repo.ID)] = true
+	}
+	return set
+}
+
+func removeStringCaseInsensitive(items []string, value string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(value))
+	kept := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.ToLower(strings.TrimSpace(item)) == needle {
+			continue
+		}
+		kept = append(kept, item)
+	}
+
+	if len(kept) == 0 {
+		return nil
+	}
+
+	return kept
 }
 
 // --- Format helpers ---

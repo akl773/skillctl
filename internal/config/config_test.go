@@ -123,7 +123,7 @@ func TestLoadAndSaveConfig(t *testing.T) {
 		assert.Equal(t, []string{"alpha", "beta", "Gamma"}, cfg.SelectedSkills)
 		assert.Equal(t, []string{"beta", "Gamma"}, cfg.DisabledSkills)
 		assert.Equal(t, []string{"~/one", "~/two"}, cfg.Targets)
-		require.Len(t, cfg.Repositories, 2)
+		require.Len(t, cfg.Repositories, len(DefaultRepositories()))
 		assert.Equal(t, "vercel-labs-agent-skills", cfg.Repositories[0].ID)
 		assert.Equal(t, "https://github.com/vercel-labs/agent-skills.git", cfg.Repositories[0].URL)
 		assert.Equal(t, "custom-id", cfg.Repositories[1].ID)
@@ -141,6 +141,12 @@ func TestLoadAndSaveConfig(t *testing.T) {
 			Repositories: []Repository{
 				{ID: "vercel-labs-agent-skills", URL: "https://github.com/vercel-labs/agent-skills.git"},
 			},
+			RemovedDefaultRepos: []string{
+				"callstackincubator-agent-skills",
+				"tech-leads-club-agent-skills",
+				"composiohq-awesome-claude-skills",
+				"sickn33-antigravity-awesome-skills",
+			},
 		}
 
 		require.NoError(t, SaveConfig(paths, want))
@@ -148,6 +154,54 @@ func TestLoadAndSaveConfig(t *testing.T) {
 
 		assert.Equal(t, want, got)
 	})
+
+	t.Run("migrates missing default repositories for existing config", func(t *testing.T) {
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
+		require.NoError(t, os.MkdirAll(paths.LocalDir, 0o755))
+
+		raw := Config{
+			Repositories: []Repository{
+				{ID: "vercel-labs-agent-skills", URL: "https://github.com/vercel-labs/agent-skills.git"},
+			},
+		}
+		require.NoError(t, WriteJSON(paths.ConfigPath, raw))
+
+		cfg := LoadConfig(paths)
+		defaultRepos := DefaultRepositories()
+		require.Len(t, cfg.Repositories, len(defaultRepos))
+
+		for _, repo := range defaultRepos {
+			assert.Contains(t, repoIDsFromRepos(cfg.Repositories), repo.ID)
+		}
+	})
+
+	t.Run("does not re-add default repositories explicitly removed by user", func(t *testing.T) {
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
+		require.NoError(t, os.MkdirAll(paths.LocalDir, 0o755))
+
+		raw := Config{
+			Repositories: []Repository{
+				{ID: "vercel-labs-agent-skills", URL: "https://github.com/vercel-labs/agent-skills.git"},
+			},
+			RemovedDefaultRepos: []string{"sickn33-antigravity-awesome-skills"},
+		}
+		require.NoError(t, WriteJSON(paths.ConfigPath, raw))
+
+		cfg := LoadConfig(paths)
+		repoIDs := repoIDsFromRepos(cfg.Repositories)
+		assert.NotContains(t, repoIDs, "sickn33-antigravity-awesome-skills")
+		assert.Contains(t, cfg.RemovedDefaultRepos, "sickn33-antigravity-awesome-skills")
+	})
+}
+
+func repoIDsFromRepos(repos []Repository) []string {
+	ids := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		ids = append(ids, repo.ID)
+	}
+	return ids
 }
 
 func TestLoadAndSaveState(t *testing.T) {
