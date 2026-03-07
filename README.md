@@ -1,10 +1,8 @@
 # skillctl
 
-An interactive TUI for managing curated AI skills across multiple agent folders.
+An interactive TUI for managing and syncing AI skills from multiple GitHub repositories into local agent folders.
 
-`skillctl` syncs skill directories from a central source repository to your AI agent target
-folders — keeping Claude, Gemini, Cursor, Codex, Kiro, OpenCode, and more up-to-date with a
-single command.
+`skillctl` keeps your Claude, Gemini, Cursor, Codex, Kiro, OpenCode, and other agent skill directories up to date from one place.
 
 ## Install
 
@@ -27,9 +25,8 @@ make install
 
 ## Prerequisites
 
-- [`git`](https://git-scm.com/) — for pulling updates from the source repo
+- [`git`](https://git-scm.com/) — for cloning and updating source repositories
 - [`rsync`](https://rsync.samba.org/) — for syncing skills to target directories (pre-installed on macOS and most Linux distros)
-- A skills source repository cloned at `~/.skills-curated` (configurable)
 
 ## Usage
 
@@ -37,21 +34,37 @@ make install
 # Launch the interactive menu
 skillctl
 
-# Use a custom source repo
-skillctl --source-repo /path/to/skills-repo
+# Use a custom workspace
+skillctl --workspace /path/to/skillctl-workspace
 
 # Print version
 skillctl --version
 ```
 
+## Default Source Repositories
+
+These repositories are included out of the box:
+
+- `https://github.com/vercel-labs/agent-skills.git`
+- `https://github.com/callstackincubator/agent-skills.git`
+- `https://github.com/tech-leads-club/agent-skills.git`
+- `https://github.com/ComposioHQ/awesome-claude-skills.git`
+
+You can add and remove repositories at runtime via `/repo add` and `/repo remove`.
+
 ## How It Works
 
-1. A curated skills repository lives at `~/.skills-curated` (or set via `--source-repo` / `$SKILLCTL_SOURCE_REPO`)
-2. You browse the skill catalog and select which skills you want
-3. `skillctl` rsyncs those skills into each of your configured target directories
-4. Targets are agent-specific skill folders (e.g. `~/.claude/skills`, `~/.config/opencode/skills`)
+1. `skillctl` stores its workspace at `~/.skillctl` by default (override via `--workspace` or `$SKILLCTL_WORKSPACE`).
+2. Repository definitions and selections are stored in `~/.skillctl/.local/skillctl.json`.
+3. `/pull` clones or updates each configured repository into `~/.skillctl/.local/repos/<repo-id>`.
+4. `skillctl` recursively discovers skills by finding `SKILL.md` files in those local clones.
+5. Skills are selected using namespaced IDs: `<repo-id>/<skill-name>`.
+6. `/sync` rsyncs selected skills to each configured target.
 
-Configuration is stored at `<source-repo>/.local/skillctl.json`.
+To prevent cross-repo collisions, target directory names use a namespaced layout:
+
+- skill ID: `vercel-labs-agent-skills/react-best-practices`
+- installed folder: `vercel-labs-agent-skills--react-best-practices`
 
 ## Default Targets
 
@@ -66,13 +79,22 @@ Configuration is stored at `<source-repo>/.local/skillctl.json`.
 
 Targets can be added or removed from within the TUI at any time.
 
+## Common Workflow
+
+1. `/repos` to inspect configured repositories
+2. `/pull` to clone/update repositories
+3. `/search <query>` to find skills
+4. `/add <skill-id>` (or `/add <catalog-number>`) to select skills
+5. `/sync` to deploy selected skills to all targets
+
 ## Features
 
 - **Interactive TUI** — keyboard-driven terminal UI with search and navigation
-- **Skill catalog** — browse and add skills from the source repo
+- **Multi-repo catalog** — aggregate skills from many repositories
+- **Namespaced skill IDs** — avoid collisions across repositories
 - **Multi-target sync** — rsync selected skills to all configured agent folders at once
-- **Git integration** — pull latest changes from the source repo
-- **Target management** — add and remove target directories on the fly
+- **Repository management** — add/remove/list repositories on the fly
+- **Git integration** — clone/pull all repositories from inside the app
 
 ## Development
 
@@ -88,10 +110,8 @@ make cover    # Run tests with coverage summary
 ## Architecture and Testing
 
 - Architecture guide: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Unit tests follow table-driven Go style with `testify/assert` and
-  `testify/require`, inspired by mature open-source Go CLI projects.
-- Priority coverage targets are `internal/config`, `internal/core`, and command
-  parsing helpers in `internal/ui`.
+- Unit tests follow table-driven Go style with `testify/assert` and `testify/require`.
+- Priority coverage targets are `internal/config`, `internal/core`, and command parsing in `internal/ui`.
 
 ## Releasing
 
