@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type commandResult struct {
 	Output string
 	Quit   bool
+	Cmd    tea.Cmd
 }
 
 type commandDef struct {
@@ -37,16 +40,18 @@ func builtInCommands() []commandDef {
 				return commandResult{Output: m.renderHelp(args)}
 			},
 		},
-		{
-			Name:        "pull",
-			Aliases:     []string{"update", "git pull"},
-			Description: "Pull latest changes in source repo",
-			Usage:       "/pull",
-			Examples:    []string{"/pull"},
-			Run: func(m *Model, args string) commandResult {
-				return commandResult{Output: m.actionGitPull()}
+		/*
+			{
+				Name:        "pull",
+				Aliases:     []string{"update", "git pull"},
+				Description: "Pull latest changes in source repo",
+				Usage:       "/pull",
+				Examples:    []string{"/pull"},
+				Run: func(m *Model, args string) commandResult {
+					return m.actionGitPull()
+				},
 			},
-		},
+		*/
 		{
 			Name:        "list",
 			Aliases:     []string{"ls"},
@@ -55,6 +60,20 @@ func builtInCommands() []commandDef {
 			Examples:    []string{"/list"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.actionListSelected()}
+			},
+		},
+		{
+			Name:        "list toggle",
+			Aliases:     []string{"toggle", "lt"},
+			Description: "Enable or disable a selected skill",
+			Usage:       "/list toggle <name|index>",
+			Examples:    []string{"/list toggle 2", "/list toggle security-auditor", "/toggle 2"},
+			Run: func(m *Model, args string) commandResult {
+				args = strings.TrimSpace(args)
+				if args == "" {
+					return commandResult{Output: errorStyle.Render("Usage: /list toggle <name|index>")}
+				}
+				return commandResult{Output: m.actionToggleSkill(args)}
 			},
 		},
 		{

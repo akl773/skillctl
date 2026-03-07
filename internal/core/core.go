@@ -77,12 +77,8 @@ func (o SyncOutcome) TotalFailed() int {
 
 // RunGitPull executes git pull --ff-only on the source repository.
 func RunGitPull(paths config.AppPaths) GitPullOutcome {
-	cmd := exec.Command("git", "-C", paths.SourceRepo, "pull", "--ff-only")
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
+	cmd := exec.Command("git", "-C", paths.SourceRepo, "pull", "--ff-only", "--progress")
+	out, err := cmd.CombinedOutput()
 	rc := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -91,11 +87,10 @@ func RunGitPull(paths config.AppPaths) GitPullOutcome {
 			rc = 1
 		}
 	}
-
 	return GitPullOutcome{
 		ReturnCode: rc,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
+		Stdout:     string(out),
+		Stderr:     "",
 	}
 }
 
@@ -163,6 +158,15 @@ func RemoveSelectedSkills(cfg *config.Config, requested []string) RemoveOutcome 
 		}
 	}
 	cfg.SelectedSkills = kept
+
+	// Keep disabled list aligned with selected skills
+	var disabledKept []string
+	for _, s := range cfg.DisabledSkills {
+		if !removeSet[s] {
+			disabledKept = append(disabledKept, s)
+		}
+	}
+	cfg.DisabledSkills = disabledKept
 
 	// Collect removed names
 	for name := range removeSet {

@@ -28,6 +28,7 @@ type AppPaths struct {
 // Config holds the user's selected skills and target directories.
 type Config struct {
 	SelectedSkills []string `json:"selected_skills"`
+	DisabledSkills []string `json:"disabled_skills"`
 	Targets        []string `json:"targets"`
 }
 
@@ -47,6 +48,7 @@ func DefaultConfig() Config {
 			"vibe-code-auditor",
 			"seo-audit",
 		},
+		DisabledSkills: []string{},
 		Targets: []string{
 			"~/.claude/skills",
 			"~/.config/opencode/skills",
@@ -126,6 +128,25 @@ func LoadConfig(paths AppPaths) Config {
 	}
 
 	cfg.SelectedSkills = UniqueOrdered(cleanStrings(cfg.SelectedSkills))
+	cfg.DisabledSkills = UniqueOrdered(cleanStrings(cfg.DisabledSkills))
+
+	selectedByLower := make(map[string]string)
+	for _, skill := range cfg.SelectedSkills {
+		selectedByLower[strings.ToLower(skill)] = skill
+	}
+
+	var normalizedDisabled []string
+	seenDisabled := make(map[string]bool)
+	for _, skill := range cfg.DisabledSkills {
+		resolved, ok := selectedByLower[strings.ToLower(skill)]
+		if !ok || seenDisabled[resolved] {
+			continue
+		}
+		normalizedDisabled = append(normalizedDisabled, resolved)
+		seenDisabled[resolved] = true
+	}
+	cfg.DisabledSkills = normalizedDisabled
+
 	cfg.Targets = UniqueOrdered(cleanStrings(cfg.Targets))
 	return cfg
 }

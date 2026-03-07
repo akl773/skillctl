@@ -12,27 +12,6 @@ import (
 
 // --- Action handlers ---
 
-func (m *Model) actionGitPull() string {
-	outcome := core.RunGitPull(m.paths)
-
-	var sb strings.Builder
-	if strings.TrimSpace(outcome.Stdout) != "" {
-		sb.WriteString(outcome.Stdout)
-	}
-	if strings.TrimSpace(outcome.Stderr) != "" {
-		sb.WriteString(mutedStyle.Render(strings.TrimSpace(outcome.Stderr)) + "\n")
-	}
-
-	if outcome.Success() {
-		sb.WriteString(successStyle.Render("\nOK: repository is up to date."))
-		m.refresh()
-	} else {
-		sb.WriteString(errorStyle.Render("\nERROR: git pull failed. Resolve git issues before syncing."))
-	}
-
-	return sb.String()
-}
-
 func (m *Model) actionListSelected() string {
 	if len(m.cfg.SelectedSkills) == 0 {
 		return warnStyle.Render("No skills selected yet.")
@@ -43,24 +22,90 @@ func (m *Model) actionListSelected() string {
 		availableSet[s] = true
 	}
 
+	disabledSet := make(map[string]bool)
+	for _, s := range m.cfg.DisabledSkills {
+		disabledSet[s] = true
+	}
+
 	var sb strings.Builder
 	sb.WriteString(infoStyle.Render("Selected Skills") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(fmt.Sprintf("%-4s %-48s %s\n", "#", "Skill", "Status"))
+	sb.WriteString(fmt.Sprintf("%-4s %-40s %-10s %s\n", "#", "Skill", "Mode", "Status"))
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
 
+	disabledCount := 0
 	for i, skill := range m.cfg.SelectedSkills {
 		status := successStyle.Render("available")
 		if !availableSet[skill] {
 			status = errorStyle.Render("missing")
 		}
-		sb.WriteString(fmt.Sprintf("%-4d %-48s %s\n", i+1, skill, status))
+
+		mode := successStyle.Render("enabled")
+		skillLabel := skill
+		if disabledSet[skill] {
+			disabledCount++
+			mode = mutedStyle.Render("disabled")
+			skillLabel = mutedStyle.Render(skill)
+		}
+
+		sb.WriteString(fmt.Sprintf("%-4d %-40s %-10s %s\n", i+1, skillLabel, mode, status))
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Total selected: %d", len(m.cfg.SelectedSkills))))
+	sb.WriteString(infoStyle.Render(fmt.Sprintf("Total selected: %d (disabled: %d)", len(m.cfg.SelectedSkills), disabledCount)))
+	sb.WriteString("\n")
+	sb.WriteString(mutedStyle.Render("Use /list toggle <index|name> to enable or disable a skill."))
 
 	return sb.String()
+}
+
+func (m *Model) actionToggleSkill(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return errorStyle.Render("Usage: /list toggle <index|name>")
+	}
+
+	if len(m.cfg.SelectedSkills) == 0 {
+		return warnStyle.Render("No skills selected yet.")
+	}
+
+	requested, invalid := config.SplitByReference([]string{raw}, m.cfg.SelectedSkills)
+	if len(invalid) > 0 {
+		return errorStyle.Render("Invalid selected-skill index.")
+	}
+
+	selectedMap := make(map[string]string)
+	for _, s := range m.cfg.SelectedSkills {
+		selectedMap[strings.ToLower(s)] = s
+	}
+
+	resolved, ok := selectedMap[strings.ToLower(requested[0])]
+	if !ok {
+		return errorStyle.Render("Skill not found in selected list.")
+	}
+
+	idx := -1
+	for i, s := range m.cfg.DisabledSkills {
+		if s == resolved {
+			idx = i
+			break
+		}
+	}
+
+	if idx >= 0 {
+		m.cfg.DisabledSkills = append(m.cfg.DisabledSkills[:idx], m.cfg.DisabledSkills[idx+1:]...)
+		if err := config.SaveConfig(m.paths, m.cfg); err != nil {
+			return errorStyle.Render("Failed to save config: " + err.Error())
+		}
+		return successStyle.Render("Enabled: " + resolved)
+	}
+
+	m.cfg.DisabledSkills = append(m.cfg.DisabledSkills, resolved)
+	m.cfg.DisabledSkills = config.UniqueOrdered(m.cfg.DisabledSkills)
+	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
+		return errorStyle.Render("Failed to save config: " + err.Error())
+	}
+	return warnStyle.Render("Disabled: " + resolved)
 }
 
 func (m *Model) actionSearch(query string) string {
