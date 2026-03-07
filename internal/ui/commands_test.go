@@ -155,6 +155,25 @@ func TestBuiltInCommands(t *testing.T) {
 	assert.Equal(t, "clear", clearCmd.Name)
 }
 
+func TestResolveBuiltInRepoCommands(t *testing.T) {
+	commands := builtInCommands()
+
+	cmd, args, ok := resolveCommand(commands, "/repo add https://github.com/foo/bar")
+	require.True(t, ok)
+	assert.Equal(t, "repo add", cmd.Name)
+	assert.Equal(t, "https://github.com/foo/bar", args)
+
+	cmd, args, ok = resolveCommand(commands, "/repo remove vercel-labs-agent-skills")
+	require.True(t, ok)
+	assert.Equal(t, "repo remove", cmd.Name)
+	assert.Equal(t, "vercel-labs-agent-skills", args)
+
+	cmd, args, ok = resolveCommand(commands, "/repos")
+	require.True(t, ok)
+	assert.Equal(t, "repos", cmd.Name)
+	assert.Equal(t, "", args)
+}
+
 func testCommandDefs() []commandDef {
 	return []commandDef{
 		{

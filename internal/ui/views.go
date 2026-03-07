@@ -174,14 +174,15 @@ func (m Model) renderChatWorkspace() string {
 }
 
 func (m Model) renderHeader(width int, compact bool, tiny bool) string {
-	stats := fmt.Sprintf("catalog %d   selected %d   targets %d",
+	stats := fmt.Sprintf("repos %d   catalog %d   selected %d   targets %d",
+		len(m.cfg.Repositories),
 		len(m.available),
 		len(m.cfg.SelectedSkills),
 		len(m.cfg.Targets),
 	)
 	stats = truncateASCII(stats, width)
 
-	repo := truncateASCII("source "+config.CompactPath(m.paths.SourceRepo), width)
+	repo := truncateASCII("workspace "+config.CompactPath(m.paths.WorkspaceDir), width)
 
 	state := mutedStyle.Render("idle")
 	if m.gitPullRunning {
@@ -320,7 +321,8 @@ func (m Model) renderWelcomeState(width int) string {
 	}
 
 	if m.compactLayout() {
-		stats := fmt.Sprintf("Catalog: %d  Selected: %d  Targets: %d",
+		stats := fmt.Sprintf("Repos: %d  Catalog: %d  Selected: %d  Targets: %d",
+			len(m.cfg.Repositories),
 			len(m.available),
 			len(m.cfg.SelectedSkills),
 			len(m.cfg.Targets),
@@ -334,7 +336,8 @@ func (m Model) renderWelcomeState(width int) string {
 		)
 	}
 
-	stats := fmt.Sprintf("Catalog: %d   Selected: %d   Targets: %d",
+	stats := fmt.Sprintf("Repos: %d   Catalog: %d   Selected: %d   Targets: %d",
+		len(m.cfg.Repositories),
 		len(m.available),
 		len(m.cfg.SelectedSkills),
 		len(m.cfg.Targets),

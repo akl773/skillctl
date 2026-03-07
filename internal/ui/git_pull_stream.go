@@ -20,12 +20,12 @@ type gitPullDoneMsg struct {
 	outcome core.GitPullOutcome
 }
 
-func startGitPullStreamCmd(paths config.AppPaths) tea.Cmd {
+func startGitPullStreamCmd(paths config.AppPaths, repositories []config.Repository) tea.Cmd {
 	return func() tea.Msg {
 		events := make(chan tea.Msg, 128)
 		go func() {
 			defer close(events)
-			outcome := core.RunGitPullStream(paths,
+			outcome := core.RunGitPullStream(paths, repositories,
 				func(chunk string) {
 					events <- gitPullChunkMsg{chunk: chunk}
 				},

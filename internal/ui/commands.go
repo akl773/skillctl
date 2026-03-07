@@ -44,7 +44,7 @@ func builtInCommands() []commandDef {
 		{
 			Name:        "pull",
 			Aliases:     []string{"update", "git pull"},
-			Description: "Pull latest changes in source repo",
+			Description: "Clone or pull all configured repositories",
 			Usage:       "/pull",
 			Examples:    []string{"/pull"},
 			Run: func(m *Model, args string) commandResult {
@@ -66,7 +66,7 @@ func builtInCommands() []commandDef {
 			Aliases:     []string{"toggle", "lt"},
 			Description: "Enable or disable a selected skill",
 			Usage:       "/list toggle <name|index>",
-			Examples:    []string{"/list toggle 2", "/list toggle security-auditor", "/toggle 2"},
+			Examples:    []string{"/list toggle 2", "/list toggle vercel-labs-agent-skills/react-best-practices", "/toggle 2"},
 			Run: func(m *Model, args string) commandResult {
 				args = strings.TrimSpace(args)
 				if args == "" {
@@ -94,7 +94,7 @@ func builtInCommands() []commandDef {
 			Aliases:     []string{"install"},
 			Description: "Add selected skills by name or number",
 			Usage:       "/add <name|index[,name|index...]>",
-			Examples:    []string{"/add code-reviewer", "/add 1,2,3"},
+			Examples:    []string{"/add vercel-labs-agent-skills/react-best-practices", "/add 1,2,3"},
 			Run: func(m *Model, args string) commandResult {
 				args = strings.TrimSpace(args)
 				if args == "" {
@@ -108,7 +108,7 @@ func builtInCommands() []commandDef {
 			Aliases:     []string{"rm", "delete"},
 			Description: "Remove selected skills by name or number",
 			Usage:       "/remove <name|index[,name|index...]>",
-			Examples:    []string{"/remove seo-audit", "/remove 2,4"},
+			Examples:    []string{"/remove vercel-labs-agent-skills/react-best-practices", "/remove 2,4"},
 			Run: func(m *Model, args string) commandResult {
 				args = strings.TrimSpace(args)
 				if args == "" {
@@ -125,6 +125,44 @@ func builtInCommands() []commandDef {
 			Examples:    []string{"/sync"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.actionSync()}
+			},
+		},
+		{
+			Name:        "repos",
+			Aliases:     []string{"repo list"},
+			Description: "List configured source repositories",
+			Usage:       "/repos",
+			Examples:    []string{"/repos"},
+			Run: func(m *Model, args string) commandResult {
+				return commandResult{Output: m.actionListRepos()}
+			},
+		},
+		{
+			Name:        "repo add",
+			Aliases:     []string{"ra"},
+			Description: "Add one source repository",
+			Usage:       "/repo add <github-url>",
+			Examples:    []string{"/repo add https://github.com/org/repo", "/repo add git@github.com:org/repo.git"},
+			Run: func(m *Model, args string) commandResult {
+				args = strings.TrimSpace(args)
+				if args == "" {
+					return commandResult{Output: errorStyle.Render("Usage: /repo add <github-url>")}
+				}
+				return commandResult{Output: m.actionAddRepo(args)}
+			},
+		},
+		{
+			Name:        "repo remove",
+			Aliases:     []string{"rr"},
+			Description: "Remove repository by index, id, or URL",
+			Usage:       "/repo remove <index|id|url>",
+			Examples:    []string{"/repo remove 2", "/repo remove vercel-labs-agent-skills"},
+			Run: func(m *Model, args string) commandResult {
+				args = strings.TrimSpace(args)
+				if args == "" {
+					return commandResult{Output: errorStyle.Render("Usage: /repo remove <index|id|url>")}
+				}
+				return commandResult{Output: m.actionRemoveRepo(args)}
 			},
 		},
 		{

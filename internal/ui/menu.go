@@ -36,11 +36,12 @@ type chatMessage struct {
 
 // Model is the root bubbletea model.
 type Model struct {
-	paths     config.AppPaths
-	cfg       config.Config
-	available []string
-	width     int
-	height    int
+	paths        config.AppPaths
+	cfg          config.Config
+	available    []config.AvailableSkill
+	availableIDs []string
+	width        int
+	height       int
 
 	contentWidth int
 	quitting     bool
@@ -76,10 +77,15 @@ func NewModel(paths config.AppPaths) Model {
 
 	vp := viewport.New(defaultContentWidth, 12)
 
+	cfg := config.LoadConfig(paths)
+	available := config.LoadAvailableSkills(paths, cfg)
+	availableIDs := config.SkillIDs(available)
+
 	m := Model{
 		paths:            paths,
-		cfg:              config.LoadConfig(paths),
-		available:        config.LoadAvailableSkills(paths),
+		cfg:              cfg,
+		available:        available,
+		availableIDs:     availableIDs,
 		contentWidth:     defaultContentWidth,
 		chatViewport:     vp,
 		gitPullOutput:    new(strings.Builder),
@@ -134,10 +140,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gitPullDoneMsg:
 		if msg.outcome.Success() {
-			m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repository is up to date."))
+			m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repositories are up to date."))
 			m.refresh()
 		} else {
-			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: git pull failed. Resolve git issues before syncing."))
+			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: one or more repository updates failed. Resolve git issues before syncing."))
 		}
 		m.upsertGitPullMessage(m.gitPullOutput.String())
 		m.gitPullRunning = false
@@ -638,5 +644,6 @@ func (m Model) View() string {
 // refresh reloads config and available skills.
 func (m *Model) refresh() {
 	m.cfg = config.LoadConfig(m.paths)
-	m.available = config.LoadAvailableSkills(m.paths)
+	m.available = config.LoadAvailableSkills(m.paths, m.cfg)
+	m.availableIDs = config.SkillIDs(m.available)
 }
