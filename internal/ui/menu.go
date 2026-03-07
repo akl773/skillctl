@@ -1,45 +1,15 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"akhilsingh.in/skillctl/internal/config"
-	"akhilsingh.in/skillctl/internal/core"
 )
 
-// menuItem represents a single item in the main menu.
-type menuItem struct {
-	title string
-	icon  string
-	desc  string
-}
-
-// viewState tracks which screen is active.
-type viewState int
-
-const (
-	viewMenu viewState = iota
-	viewResult
-	viewInput
-	viewSearchResults
-	viewTargets
-	viewTargetInput
-)
-
-// inputAction specifies what the text input is being used for.
-type inputAction int
-
-const (
-	inputAddSkill inputAction = iota
-	inputSearch
-	inputRemoveSkill
-	inputAddTarget
-	inputRemoveTarget
-)
+const maxPaletteItems = 8
 
 // Model is the root bubbletea model.
 type Model struct {
@@ -49,46 +19,40 @@ type Model struct {
 	width     int
 	height    int
 
-	// menu state
-	cursor   int
-	items    []menuItem
-	view     viewState
-	result   string
 	quitting bool
+	output   string
 
-	// input state
-	textInput   textinput.Model
-	inputAction inputAction
+	commandInput  textinput.Model
+	commands      []commandDef
+	matches       []commandMatch
+	paletteCursor int
 
-	// search state
-	searchMatches []string
+	history      []string
+	historyIndex int
 }
 
 // NewModel creates a new UI model.
 func NewModel(paths config.AppPaths) Model {
 	ti := textinput.New()
-	ti.CharLimit = 256
-	ti.Width = 60
+	ti.Prompt = ""
+	ti.CharLimit = 512
+	ti.Width = 72
+	ti.Placeholder = "/help"
+	ti.SetValue("/")
+	ti.CursorEnd()
+	_ = ti.Focus()
 
-	items := []menuItem{
-		{title: "Git Pull", icon: "⬇", desc: "Pull latest from source repo"},
-		{title: "List Selected", icon: "📋", desc: "View your selected skills"},
-		{title: "Search Skills", icon: "🔍", desc: "Search the skill catalog"},
-		{title: "Add Skill", icon: "➕", desc: "Add skills to your selection"},
-		{title: "Remove Skill", icon: "➖", desc: "Remove skills from selection + targets"},
-		{title: "Sync Skills", icon: "🔄", desc: "Rsync selected skills to all targets"},
-		{title: "Manage Targets", icon: "📁", desc: "Add or remove target folders"},
-		{title: "Status", icon: "ℹ️", desc: "View full status overview"},
-		{title: "Exit", icon: "👋", desc: "Quit skillctl"},
+	m := Model{
+		paths:        paths,
+		cfg:          config.LoadConfig(paths),
+		available:    config.LoadAvailableSkills(paths),
+		output:       infoStyle.Render("Type / to browse commands. Try /help to get started."),
+		commandInput: ti,
+		commands:     builtInCommands(),
+		historyIndex: 0,
 	}
-
-	return Model{
-		paths:     paths,
-		cfg:       config.LoadConfig(paths),
-		available: config.LoadAvailableSkills(paths),
-		items:     items,
-		textInput: ti,
-	}
+	m.recomputeMatches()
+	return m
 }
 
 // Init is the bubbletea init function.
@@ -102,17 +66,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.commandInput.Width = max(24, msg.Width-14)
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-	}
 
-	// pass messages to text input when active
-	if m.view == viewInput || m.view == viewSearchResults || m.view == viewTargetInput {
-		var cmd tea.Cmd
-		m.textInput, cmd = m.textInput.Update(msg)
-		return m, cmd
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 
 	return m, nil
@@ -121,267 +82,250 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Global quit
 	if key == "ctrl+c" {
 		m.quitting = true
 		return m, tea.Quit
 	}
 
-	switch m.view {
-	case viewMenu:
-		return m.handleMenuKey(key)
-	case viewResult:
-		return m.handleResultKey(key)
-	case viewInput:
-		return m.handleInputKey(msg)
-	case viewSearchResults:
-		return m.handleSearchResultsKey(msg)
-	case viewTargets:
-		return m.handleTargetsKey(key)
-	case viewTargetInput:
-		return m.handleTargetInputKey(msg)
-	}
-
-	return m, nil
-}
-
-func (m Model) handleMenuKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.items)-1 {
-			m.cursor++
-		}
-	case "home":
-		m.cursor = 0
-	case "end":
-		m.cursor = len(m.items) - 1
-	case "enter":
-		return m.executeMenuItem()
-	case "q":
-		m.quitting = true
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-func (m Model) handleResultKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "enter", "escape", "backspace", "q":
-		m.view = viewMenu
-		m.result = ""
-	}
-	return m, nil
-}
-
-func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
 	switch key {
 	case "enter":
-		return m.submitInput()
-	case "escape":
-		m.view = viewMenu
+		return m.submitCommand()
+	case "tab":
+		m.autocompleteSelected()
 		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m Model) handleSearchResultsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	switch key {
-	case "enter":
-		return m.submitSearchAdd()
-	case "escape":
-		m.view = viewMenu
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m Model) handleTargetsKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "a":
-		m.view = viewTargetInput
-		m.inputAction = inputAddTarget
-		m.textInput.SetValue("")
-		m.textInput.Focus()
-		m.textInput.Placeholder = "~/path/to/target"
-		return m, m.textInput.Focus()
-	case "r":
-		m.view = viewTargetInput
-		m.inputAction = inputRemoveTarget
-		m.textInput.SetValue("")
-		m.textInput.Focus()
-		m.textInput.Placeholder = "target number"
-		return m, m.textInput.Focus()
-	case "escape", "backspace", "q":
-		m.view = viewMenu
-	}
-	return m, nil
-}
-
-func (m Model) handleTargetInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	switch key {
-	case "enter":
-		return m.submitTargetInput()
-	case "escape":
-		m.view = viewTargets
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m Model) executeMenuItem() (tea.Model, tea.Cmd) {
-	switch m.cursor {
-	case 0: // Git Pull
-		m.result = m.actionGitPull()
-		m.view = viewResult
-	case 1: // List Selected
-		m.result = m.actionListSelected()
-		m.view = viewResult
-	case 2: // Search
-		m.view = viewInput
-		m.inputAction = inputSearch
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "search terms..."
-		m.textInput.Focus()
-		return m, m.textInput.Focus()
-	case 3: // Add
-		m.view = viewInput
-		m.inputAction = inputAddSkill
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "skill names (comma-separated)"
-		m.textInput.Focus()
-		return m, m.textInput.Focus()
-	case 4: // Remove
-		m.view = viewInput
-		m.inputAction = inputRemoveSkill
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "skill name or number"
-		m.textInput.Focus()
-		return m, m.textInput.Focus()
-	case 5: // Sync
-		m.result = m.actionSync()
-		m.view = viewResult
-	case 6: // Manage Targets
-		m.view = viewTargets
-	case 7: // Status
-		m.result = m.actionStatus()
-		m.view = viewResult
-	case 8: // Exit
-		m.quitting = true
-		return m, tea.Quit
-	}
-
-	return m, nil
-}
-
-func (m Model) submitInput() (tea.Model, tea.Cmd) {
-	value := m.textInput.Value()
-	if value == "" {
-		m.view = viewMenu
-		return m, nil
-	}
-
-	switch m.inputAction {
-	case inputAddSkill:
-		m.result = m.actionAddSkill(value)
-		m.view = viewResult
-	case inputSearch:
-		return m.actionSearch(value)
-	case inputRemoveSkill:
-		m.result = m.actionRemoveSkill(value)
-		m.view = viewResult
-	}
-
-	return m, nil
-}
-
-func (m Model) submitSearchAdd() (tea.Model, tea.Cmd) {
-	value := m.textInput.Value()
-	if value == "" {
-		m.view = viewMenu
-		return m, nil
-	}
-
-	tokens := config.InputCSV(value)
-	requested, invalid := config.SplitByReference(tokens, m.searchMatches)
-
-	var sb strings.Builder
-	if len(invalid) > 0 {
-		sb.WriteString(fmt.Sprintf("Invalid number(s): %s\n\n", strings.Join(invalid, ", ")))
-	}
-
-	outcome := core.AddRequestedSkills(&m.cfg, requested, m.available)
-	if len(outcome.Added) > 0 {
-		_ = config.SaveConfig(m.paths, m.cfg)
-	}
-	sb.WriteString(formatAddOutcome(outcome))
-
-	m.result = sb.String()
-	m.view = viewResult
-	return m, nil
-}
-
-func (m Model) submitTargetInput() (tea.Model, tea.Cmd) {
-	value := m.textInput.Value()
-	if value == "" {
-		m.view = viewTargets
-		return m, nil
-	}
-
-	switch m.inputAction {
-	case inputAddTarget:
-		normalized := config.CompactPath(config.ExpandPath(value))
-		for _, t := range m.cfg.Targets {
-			if t == normalized {
-				m.result = "Target already exists: " + normalized
-				m.view = viewResult
-				return m, nil
-			}
-		}
-		m.cfg.Targets = append(m.cfg.Targets, normalized)
-		_ = config.SaveConfig(m.paths, m.cfg)
-		m.result = "Added target: " + normalized
-		m.view = viewResult
-
-	case inputRemoveTarget:
-		tokens, _ := config.SplitByReference([]string{value}, m.cfg.Targets)
-		if len(tokens) == 0 {
-			m.result = "Invalid target number"
-			m.view = viewResult
+	case "up":
+		if m.paletteOpen() {
+			m.movePalette(-1)
 			return m, nil
 		}
-		removed := tokens[0]
-		var kept []string
-		for _, t := range m.cfg.Targets {
-			if t != removed {
-				kept = append(kept, t)
-			}
+		m.historyPrev()
+		return m, nil
+	case "down":
+		if m.paletteOpen() {
+			m.movePalette(1)
+			return m, nil
 		}
-		m.cfg.Targets = kept
-		_ = config.SaveConfig(m.paths, m.cfg)
-		m.result = "Removed target: " + removed
-		m.view = viewResult
+		m.historyNext()
+		return m, nil
+	case "ctrl+p":
+		m.historyPrev()
+		return m, nil
+	case "ctrl+n":
+		m.historyNext()
+		return m, nil
+	case "esc":
+		m.commandInput.SetValue("/")
+		m.commandInput.CursorEnd()
+		m.historyIndex = len(m.history)
+		m.recomputeMatches()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	m.normalizeInput()
+	m.historyIndex = len(m.history)
+	m.recomputeMatches()
+	return m, cmd
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if !m.paletteOpen() {
+		return m, nil
+	}
+
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.movePalette(-1)
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		m.movePalette(1)
+		return m, nil
+	case tea.MouseButtonLeft:
+		start := m.paletteStartRow()
+		idx := msg.Y - start
+		visible := m.visibleMatches()
+		if idx >= 0 && idx < len(visible) {
+			m.paletteCursor = idx
+			m.autocompleteSelected()
+		}
+		return m, nil
 	}
 
 	return m, nil
+}
+
+func (m Model) submitCommand() (tea.Model, tea.Cmd) {
+	raw := strings.TrimSpace(m.commandInput.Value())
+	if raw == "" || raw == "/" {
+		m.output = m.renderHelp("")
+		m.commandInput.SetValue("/")
+		m.commandInput.CursorEnd()
+		m.recomputeMatches()
+		return m, nil
+	}
+	if !strings.HasPrefix(raw, "/") {
+		raw = "/" + raw
+	}
+
+	cmd, args, ok := resolveCommand(m.commands, raw)
+	if !ok {
+		if m.paletteOpen() {
+			m.autocompleteSelected()
+			return m, nil
+		}
+		m.output = errorStyle.Render("Unknown command.") + "\n" + mutedStyle.Render("Try /help.")
+		return m, nil
+	}
+
+	m.appendHistory(raw)
+	result := cmd.Run(&m, args)
+	if strings.TrimSpace(result.Output) != "" {
+		m.output = result.Output
+	}
+
+	m.commandInput.SetValue("/")
+	m.commandInput.CursorEnd()
+	m.recomputeMatches()
+	m.historyIndex = len(m.history)
+
+	if result.Quit {
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	return m, nil
+}
+
+func (m *Model) normalizeInput() {
+	value := m.commandInput.Value()
+	if strings.TrimSpace(value) == "" {
+		m.commandInput.SetValue("/")
+		m.commandInput.CursorEnd()
+		return
+	}
+
+	trimmedLeft := strings.TrimLeft(value, " ")
+	if !strings.HasPrefix(trimmedLeft, "/") {
+		trimmedLeft = "/" + trimmedLeft
+	}
+
+	if trimmedLeft != value {
+		m.commandInput.SetValue(trimmedLeft)
+		m.commandInput.CursorEnd()
+	}
+}
+
+func (m *Model) recomputeMatches() {
+	m.matches = matchCommands(m.commands, commandFragment(m.commandInput.Value()))
+	visible := m.visibleMatches()
+	if len(visible) == 0 {
+		m.paletteCursor = 0
+		return
+	}
+	if m.paletteCursor >= len(visible) {
+		m.paletteCursor = len(visible) - 1
+	}
+	if m.paletteCursor < 0 {
+		m.paletteCursor = 0
+	}
+}
+
+func (m Model) visibleMatches() []commandMatch {
+	if len(m.matches) <= maxPaletteItems {
+		return m.matches
+	}
+	return m.matches[:maxPaletteItems]
+}
+
+func (m Model) paletteOpen() bool {
+	return len(m.visibleMatches()) > 0
+}
+
+func (m *Model) movePalette(delta int) {
+	visible := m.visibleMatches()
+	if len(visible) == 0 {
+		return
+	}
+	m.paletteCursor += delta
+	if m.paletteCursor < 0 {
+		m.paletteCursor = len(visible) - 1
+	}
+	if m.paletteCursor >= len(visible) {
+		m.paletteCursor = 0
+	}
+}
+
+func (m *Model) autocompleteSelected() {
+	visible := m.visibleMatches()
+	if len(visible) == 0 {
+		return
+	}
+	if m.paletteCursor < 0 || m.paletteCursor >= len(visible) {
+		m.paletteCursor = 0
+	}
+	chosen := visible[m.paletteCursor].Command.Name
+	m.commandInput.SetValue("/" + chosen + " ")
+	m.commandInput.CursorEnd()
+	m.recomputeMatches()
+}
+
+func (m *Model) appendHistory(cmd string) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return
+	}
+	if len(m.history) == 0 || m.history[len(m.history)-1] != cmd {
+		m.history = append(m.history, cmd)
+	}
+	m.historyIndex = len(m.history)
+}
+
+func (m *Model) historyPrev() {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyIndex <= 0 {
+		m.historyIndex = 0
+	} else {
+		m.historyIndex--
+	}
+	m.commandInput.SetValue(m.history[m.historyIndex])
+	m.commandInput.CursorEnd()
+	m.recomputeMatches()
+}
+
+func (m *Model) historyNext() {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyIndex >= len(m.history)-1 {
+		m.historyIndex = len(m.history)
+		m.commandInput.SetValue("/")
+		m.commandInput.CursorEnd()
+		m.recomputeMatches()
+		return
+	}
+	m.historyIndex++
+	m.commandInput.SetValue(m.history[m.historyIndex])
+	m.commandInput.CursorEnd()
+	m.recomputeMatches()
+}
+
+func (m Model) paletteStartRow() int {
+	return 6
+}
+
+func commandFragment(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "/") {
+		raw = strings.TrimSpace(raw[1:])
+	}
+	return raw
 }
 
 // View renders the current state.
@@ -390,22 +334,7 @@ func (m Model) View() string {
 		return renderGoodbye(m.width)
 	}
 
-	switch m.view {
-	case viewMenu:
-		return m.renderMainMenu()
-	case viewResult:
-		return m.renderResultView()
-	case viewInput:
-		return m.renderInputView()
-	case viewSearchResults:
-		return m.renderSearchResultsView()
-	case viewTargets:
-		return m.renderTargetsView()
-	case viewTargetInput:
-		return m.renderTargetInputView()
-	}
-
-	return ""
+	return m.renderCommandWorkspace()
 }
 
 // refresh reloads config and available skills.
