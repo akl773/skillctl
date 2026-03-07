@@ -40,7 +40,7 @@ func (m *Model) actionListSelected() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(infoStyle.Render("Selected Skills") + "\n")
+	sb.WriteString(infoStyle.Render("🧰 Selected") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
 	sb.WriteString(fmt.Sprintf("%-4s %-40s %-10s %s\n", "#", "Skill", "Mode", "Status"))
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
@@ -64,9 +64,9 @@ func (m *Model) actionListSelected() string {
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Total selected: %d (disabled: %d)", len(m.cfg.SelectedSkills), disabledCount)))
+	sb.WriteString(infoStyle.Render(fmt.Sprintf("📌 total: %d (disabled: %d)", len(m.cfg.SelectedSkills), disabledCount)))
 	sb.WriteString("\n")
-	sb.WriteString(mutedStyle.Render("Use /list toggle <index|name> to enable or disable a skill."))
+	sb.WriteString(mutedStyle.Render("ℹ️ /list toggle <index|name> to enable or disable a skill."))
 
 	return sb.String()
 }
