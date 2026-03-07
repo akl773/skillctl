@@ -176,8 +176,74 @@ func (m *Model) actionSearch(query string) string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(mutedStyle.Render("Use /add <skill-id> or /add <catalog-number> to add a result."))
+	sb.WriteString(mutedStyle.Render("Use /skills <skill-id> or /skills <catalog-number> to toggle a result."))
 	return sb.String()
+}
+
+func (m *Model) actionToggleSkillSelection(raw string) string {
+	tokens := config.InputCSV(raw)
+	if len(tokens) == 0 {
+		return warnStyle.Render("No skill names provided.")
+	}
+
+	requested, invalid := config.SplitByReference(tokens, m.availableIDs)
+	requested = config.UniqueOrdered(requested)
+
+	selectedMap := make(map[string]string, len(m.cfg.SelectedSkills))
+	for _, skill := range m.cfg.SelectedSkills {
+		selectedMap[strings.ToLower(skill)] = skill
+	}
+
+	addRequested := make([]string, 0, len(requested))
+	removeRequested := make([]string, 0, len(requested))
+	for _, token := range requested {
+		if selected, ok := selectedMap[strings.ToLower(token)]; ok {
+			removeRequested = append(removeRequested, selected)
+			continue
+		}
+		addRequested = append(addRequested, token)
+	}
+
+	var sb strings.Builder
+	if len(invalid) > 0 {
+		sb.WriteString(errorStyle.Render(fmt.Sprintf("Invalid catalog number(s): %s", strings.Join(invalid, ", "))) + "\n\n")
+	}
+
+	sb.WriteString(m.applySkillSelectionChanges(addRequested, removeRequested))
+	return sb.String()
+}
+
+func (m *Model) applySkillSelectionChanges(addRequested, removeRequested []string) string {
+	addRequested = config.UniqueOrdered(addRequested)
+	removeRequested = config.UniqueOrdered(removeRequested)
+
+	addOutcome := core.AddOutcome{}
+	removeOutcome := core.RemoveOutcome{}
+
+	if len(addRequested) > 0 {
+		addOutcome = core.AddRequestedSkills(&m.cfg, addRequested, m.availableIDs)
+	}
+	if len(removeRequested) > 0 {
+		removeOutcome = core.RemoveSelectedSkills(&m.cfg, removeRequested)
+	}
+
+	if len(addOutcome.Added) > 0 || len(removeOutcome.RemovedFromSelected) > 0 {
+		_ = config.SaveConfig(m.paths, m.cfg)
+	}
+
+	addText := strings.TrimSpace(formatAddOutcome(addOutcome))
+	removeText := strings.TrimSpace(formatRemoveOutcome(removeOutcome))
+
+	switch {
+	case addText == "" && removeText == "":
+		return infoStyle.Render("No selection changes.")
+	case addText == "":
+		return removeText
+	case removeText == "":
+		return addText
+	default:
+		return addText + "\n\n" + removeText
+	}
 }
 
 func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
@@ -334,25 +400,7 @@ func (m *Model) actionRemoveSkill(raw string) string {
 	if len(outcome.RemovedFromSelected) > 0 {
 		_ = config.SaveConfig(m.paths, m.cfg)
 	}
-
-	if len(outcome.RemovedFromSelected) > 0 {
-		sb.WriteString(successStyle.Render("Removed from selection:") + "\n")
-		for _, skill := range outcome.RemovedFromSelected {
-			sb.WriteString(fmt.Sprintf("  - %s\n", skill))
-		}
-
-		if len(outcome.RemovedPaths) > 0 {
-			sb.WriteString(infoStyle.Render("\nRemoved from targets:") + "\n")
-			for _, p := range outcome.RemovedPaths {
-				sb.WriteString(fmt.Sprintf("  - %s\n", p))
-			}
-		}
-		sb.WriteString(successStyle.Render(fmt.Sprintf("\nOK: removed %d target folder(s).", len(outcome.RemovedPaths))))
-	}
-
-	if len(outcome.NotSelected) > 0 {
-		sb.WriteString(warnStyle.Render(fmt.Sprintf("\nNot in selected list: %s", strings.Join(outcome.NotSelected, ", "))))
-	}
+	sb.WriteString(formatRemoveOutcome(outcome))
 
 	return sb.String()
 }
@@ -771,6 +819,34 @@ func formatAddOutcome(outcome core.AddOutcome) string {
 				sb.WriteString(fmt.Sprintf("  ! %s\n", missing.Name))
 			}
 		}
+	}
+
+	return sb.String()
+}
+
+func formatRemoveOutcome(outcome core.RemoveOutcome) string {
+	var sb strings.Builder
+
+	if len(outcome.RemovedFromSelected) > 0 {
+		sb.WriteString(successStyle.Render("Removed from selection:") + "\n")
+		for _, skill := range outcome.RemovedFromSelected {
+			sb.WriteString(fmt.Sprintf("  - %s\n", skill))
+		}
+
+		if len(outcome.RemovedPaths) > 0 {
+			sb.WriteString(infoStyle.Render("\nRemoved from targets:") + "\n")
+			for _, p := range outcome.RemovedPaths {
+				sb.WriteString(fmt.Sprintf("  - %s\n", p))
+			}
+		}
+		sb.WriteString(successStyle.Render(fmt.Sprintf("\nOK: removed %d target folder(s).", len(outcome.RemovedPaths))))
+	}
+
+	if len(outcome.NotSelected) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(warnStyle.Render(fmt.Sprintf("Not in selected list: %s", strings.Join(outcome.NotSelected, ", "))))
 	}
 
 	return sb.String()

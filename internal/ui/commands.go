@@ -38,7 +38,7 @@ func builtInCommands() []commandDef {
 			Aliases:     []string{"h", "?"},
 			Description: "Show all commands or command details",
 			Usage:       "/help [command]",
-			Examples:    []string{"/help", "/help add", "/help target add"},
+			Examples:    []string{"/help", "/help skills", "/help target add"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.renderHelp(args)}
 			},
@@ -92,32 +92,18 @@ func builtInCommands() []commandDef {
 			},
 		},
 		{
-			Name:        "add",
-			Aliases:     []string{"install"},
-			Description: "Add skills via picker, name, or number",
-			Usage:       "/add [name|index[,name|index...]]",
-			Examples:    []string{"/add", "/add vercel-labs-agent-skills/react-best-practices", "/add 1,2,3"},
+			Name:        "skills",
+			Aliases:     []string{"sk"},
+			Description: "Toggle skills via picker, name, or number",
+			Usage:       "/skills [name|index[,name|index...]]",
+			Examples:    []string{"/skills", "/skills vercel-labs-agent-skills/react-best-practices", "/skills 1,2,3"},
 			Run: func(m *Model, args string) commandResult {
 				args = strings.TrimSpace(args)
 				if args == "" {
 					m.enterSkillPicker()
 					return commandResult{KeepInput: true}
 				}
-				return commandResult{Output: m.actionAddSkill(args)}
-			},
-		},
-		{
-			Name:        "remove",
-			Aliases:     []string{"rm", "delete"},
-			Description: "Remove selected skills by name or number",
-			Usage:       "/remove <name|index[,name|index...]>",
-			Examples:    []string{"/remove vercel-labs-agent-skills/react-best-practices", "/remove 2,4"},
-			Run: func(m *Model, args string) commandResult {
-				args = strings.TrimSpace(args)
-				if args == "" {
-					return commandResult{Output: errorStyle.Render("Usage: /remove <name or index list>")}
-				}
-				return commandResult{Output: m.actionRemoveSkill(args)}
+				return commandResult{Output: m.actionToggleSkillSelection(args)}
 			},
 		},
 		{
