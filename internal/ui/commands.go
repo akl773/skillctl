@@ -11,6 +11,7 @@ import (
 type commandResult struct {
 	Output string
 	Quit   bool
+	Clear  bool
 	Cmd    tea.Cmd
 }
 
@@ -177,11 +178,11 @@ func builtInCommands() []commandDef {
 		{
 			Name:        "clear",
 			Aliases:     []string{"cls"},
-			Description: "Clear output panel",
+			Description: "Clear chat history",
 			Usage:       "/clear",
 			Examples:    []string{"/clear"},
 			Run: func(m *Model, args string) commandResult {
-				return commandResult{Output: infoStyle.Render("Output cleared.")}
+				return commandResult{Output: infoStyle.Render("Conversation cleared."), Clear: true}
 			},
 		},
 		{
