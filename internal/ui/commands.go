@@ -208,7 +208,7 @@ func (m Model) renderHelp(raw string) string {
 			sb.WriteString(fmt.Sprintf("/%-14s %s\n", cmd.Name, cmd.Description))
 		}
 		sb.WriteString(mutedStyle.Render(strings.Repeat("-", 78)) + "\n")
-		sb.WriteString(mutedStyle.Render("Tips: Up/Down to pick a command, Tab to autocomplete, Enter to run."))
+		sb.WriteString(mutedStyle.Render("Tips: Type / to browse commands, Up/Down to pick, Tab to autocomplete, Enter to run."))
 		sb.WriteString("\n")
 		sb.WriteString(mutedStyle.Render("Use /help <command> for detailed usage."))
 		return sb.String()
@@ -239,10 +239,16 @@ func (m Model) renderHelp(raw string) string {
 func matchCommands(commands []commandDef, fragment string) []commandMatch {
 	query := strings.TrimSpace(strings.ToLower(fragment))
 	matches := make([]commandMatch, 0, len(commands))
+	nameMatches := make([]commandMatch, 0, len(commands))
 	for _, cmd := range commands {
 		score, ok := scoreCommand(query, cmd)
-		if ok {
-			matches = append(matches, commandMatch{Command: cmd, Score: score})
+		if !ok {
+			continue
+		}
+		match := commandMatch{Command: cmd, Score: score}
+		matches = append(matches, match)
+		if query != "" && nameMatchesQuery(query, cmd) {
+			nameMatches = append(nameMatches, match)
 		}
 	}
 
@@ -253,7 +259,28 @@ func matchCommands(commands []commandDef, fragment string) []commandMatch {
 		return matches[i].Command.Name < matches[j].Command.Name
 	})
 
+	if len(nameMatches) > 0 {
+		sort.SliceStable(nameMatches, func(i, j int) bool {
+			if nameMatches[i].Score != nameMatches[j].Score {
+				return nameMatches[i].Score < nameMatches[j].Score
+			}
+			return nameMatches[i].Command.Name < nameMatches[j].Command.Name
+		})
+		return nameMatches
+	}
+
 	return matches
+}
+
+func nameMatchesQuery(query string, cmd commandDef) bool {
+	name := strings.ToLower(cmd.Name)
+	if query == name {
+		return true
+	}
+	if strings.HasPrefix(query, name+" ") {
+		return true
+	}
+	return strings.HasPrefix(name, query)
 }
 
 func scoreCommand(query string, cmd commandDef) (int, bool) {
