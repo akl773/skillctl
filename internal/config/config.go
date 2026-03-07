@@ -12,24 +12,42 @@ import (
 // Version is the application version, injected at build time via -ldflags.
 var Version = "0.1.1"
 
-// DefaultSourceRepo is the default path to the skills source repository.
-var DefaultSourceRepo = filepath.Join(homeDir(), ".skills-curated")
+// DefaultWorkspaceDir is the default workspace path for skillctl metadata.
+var DefaultWorkspaceDir = filepath.Join(homeDir(), ".skillctl")
+
+var defaultRepositoryURLs = []string{
+	"https://github.com/vercel-labs/agent-skills.git",
+	"https://github.com/callstackincubator/agent-skills.git",
+	"https://github.com/tech-leads-club/agent-skills.git",
+	"https://github.com/ComposioHQ/awesome-claude-skills.git",
+}
 
 // AppPaths holds all resolved filesystem paths used by the application.
 type AppPaths struct {
-	SourceRepo     string
-	LocalDir       string
-	ConfigPath     string
-	StatePath      string
-	SourceSkillDir string
-	GitExcludePath string
+	WorkspaceDir string
+	LocalDir     string
+	ConfigPath   string
+	StatePath    string
+	RepoCacheDir string
 }
 
-// Config holds the user's selected skills and target directories.
+// RepoPath returns the local clone path for a repository id.
+func (p AppPaths) RepoPath(repoID string) string {
+	return filepath.Join(p.RepoCacheDir, repoID)
+}
+
+// Repository identifies an upstream git repository that contains skills.
+type Repository struct {
+	ID  string `json:"id"`
+	URL string `json:"url"`
+}
+
+// Config holds user-selected skills, targets, and configured repositories.
 type Config struct {
-	SelectedSkills []string `json:"selected_skills"`
-	DisabledSkills []string `json:"disabled_skills"`
-	Targets        []string `json:"targets"`
+	SelectedSkills []string     `json:"selected_skills"`
+	DisabledSkills []string     `json:"disabled_skills"`
+	Targets        []string     `json:"targets"`
+	Repositories   []Repository `json:"repositories"`
 }
 
 // State holds runtime state persisted between sessions.
@@ -37,17 +55,19 @@ type State struct {
 	LastSyncAt string `json:"last_sync_at,omitempty"`
 }
 
+// AvailableSkill describes one discoverable skill from a local repository clone.
+type AvailableSkill struct {
+	ID         string
+	Name       string
+	RepoID     string
+	RepoURL    string
+	SourcePath string
+}
+
 // DefaultConfig returns the factory-default configuration.
 func DefaultConfig() Config {
 	return Config{
-		SelectedSkills: []string{
-			"ui-ux-pro-max",
-			"code-reviewer",
-			"security-auditor",
-			"architect-review",
-			"vibe-code-auditor",
-			"seo-audit",
-		},
+		SelectedSkills: []string{},
 		DisabledSkills: []string{},
 		Targets: []string{
 			"~/.claude/skills",
@@ -57,7 +77,21 @@ func DefaultConfig() Config {
 			"~/.codex/skills",
 			"~/.kiro/skills",
 		},
+		Repositories: DefaultRepositories(),
 	}
+}
+
+// DefaultRepositories returns the built-in source repositories.
+func DefaultRepositories() []Repository {
+	repos := make([]Repository, 0, len(defaultRepositoryURLs))
+	for _, raw := range defaultRepositoryURLs {
+		repo, err := NormalizeRepository(raw)
+		if err != nil {
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	return repos
 }
 
 // ProtectedTargetDirNames are directory names that should never be pruned.
@@ -66,41 +100,34 @@ var ProtectedTargetDirNames = map[string]bool{
 }
 
 // ResolvePaths builds the full set of application paths.
-func ResolvePaths(sourceRepo string) AppPaths {
-	repo := sourceRepo
-	if repo == "" {
-		repo = os.Getenv("SKILLCTL_SOURCE_REPO")
+func ResolvePaths(workspaceDir string) AppPaths {
+	root := workspaceDir
+	if root == "" {
+		root = os.Getenv("SKILLCTL_WORKSPACE")
 	}
-	if repo == "" {
-		repo = DefaultSourceRepo
+	if root == "" {
+		root = DefaultWorkspaceDir
 	}
-	repo = ExpandPath(repo)
+	root = ExpandPath(root)
 
-	localDir := filepath.Join(repo, ".local")
+	localDir := filepath.Join(root, ".local")
 	return AppPaths{
-		SourceRepo:     repo,
-		LocalDir:       localDir,
-		ConfigPath:     filepath.Join(localDir, "skillctl.json"),
-		StatePath:      filepath.Join(localDir, "state.json"),
-		SourceSkillDir: filepath.Join(repo, "skills"),
-		GitExcludePath: filepath.Join(repo, ".git", "info", "exclude"),
+		WorkspaceDir: root,
+		LocalDir:     localDir,
+		ConfigPath:   filepath.Join(localDir, "skillctl.json"),
+		StatePath:    filepath.Join(localDir, "state.json"),
+		RepoCacheDir: filepath.Join(localDir, "repos"),
 	}
 }
 
-// EnsureSetup validates the source repo and bootstraps config/state files.
+// EnsureSetup bootstraps workspace directories and config/state files.
 func EnsureSetup(paths AppPaths) error {
-	info, err := os.Stat(paths.SourceSkillDir)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("skills source directory not found: %s", CompactPath(paths.SourceSkillDir))
+	if err := os.MkdirAll(paths.WorkspaceDir, 0o755); err != nil {
+		return fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
-	gitDir := filepath.Join(paths.SourceRepo, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		return fmt.Errorf("source repo is not a git repository: %s", CompactPath(paths.SourceRepo))
-	}
-
-	if err := os.MkdirAll(paths.LocalDir, 0o755); err != nil {
-		return fmt.Errorf("cannot create local directory: %w", err)
+	if err := os.MkdirAll(paths.RepoCacheDir, 0o755); err != nil {
+		return fmt.Errorf("cannot create repository cache directory: %w", err)
 	}
 
 	if _, err := os.Stat(paths.ConfigPath); os.IsNotExist(err) {
@@ -116,7 +143,6 @@ func EnsureSetup(paths AppPaths) error {
 		}
 	}
 
-	ensureLocalExclude(paths)
 	return nil
 }
 
@@ -148,6 +174,8 @@ func LoadConfig(paths AppPaths) Config {
 	cfg.DisabledSkills = normalizedDisabled
 
 	cfg.Targets = UniqueOrdered(cleanStrings(cfg.Targets))
+	cfg.Repositories = normalizeRepositories(cfg.Repositories)
+
 	return cfg
 }
 
@@ -170,21 +198,118 @@ func SaveState(paths AppPaths, st State) error {
 	return WriteJSON(paths.StatePath, st)
 }
 
-// LoadAvailableSkills scans the source skills directory and returns sorted names.
-func LoadAvailableSkills(paths AppPaths) []string {
-	entries, err := os.ReadDir(paths.SourceSkillDir)
-	if err != nil {
-		return nil
+// LoadAvailableSkills discovers skills from all configured local repository clones.
+func LoadAvailableSkills(paths AppPaths, cfg Config) []AvailableSkill {
+	var skills []AvailableSkill
+	seenIDs := make(map[string]bool)
+
+	for _, repo := range cfg.Repositories {
+		repoPath := paths.RepoPath(repo.ID)
+		if info, err := os.Stat(repoPath); err != nil || !info.IsDir() {
+			continue
+		}
+
+		_ = filepath.WalkDir(repoPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+
+			rel, err := filepath.Rel(repoPath, path)
+			if err != nil {
+				return nil
+			}
+
+			if rel == "." {
+				return nil
+			}
+
+			if hasHiddenPathSegment(rel) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			if d.IsDir() || d.Name() != "SKILL.md" {
+				return nil
+			}
+
+			skillDir := filepath.Dir(path)
+			skillName := filepath.Base(skillDir)
+			skillID := repo.ID + "/" + skillName
+
+			if seenIDs[skillID] {
+				relDir, relErr := filepath.Rel(repoPath, skillDir)
+				if relErr == nil {
+					skillID = repo.ID + "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "__")
+				}
+			}
+
+			if seenIDs[skillID] {
+				return nil
+			}
+
+			skills = append(skills, AvailableSkill{
+				ID:         skillID,
+				Name:       skillName,
+				RepoID:     repo.ID,
+				RepoURL:    repo.URL,
+				SourcePath: skillDir,
+			})
+			seenIDs[skillID] = true
+			return nil
+		})
 	}
 
-	var skills []string
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			skills = append(skills, e.Name())
+	sort.Slice(skills, func(i, j int) bool {
+		if skills[i].ID != skills[j].ID {
+			return skills[i].ID < skills[j].ID
 		}
-	}
-	sort.Strings(skills)
+		return skills[i].SourcePath < skills[j].SourcePath
+	})
+
 	return skills
+}
+
+// SkillIDs returns IDs from a catalog list.
+func SkillIDs(skills []AvailableSkill) []string {
+	ids := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		ids = append(ids, skill.ID)
+	}
+	return ids
+}
+
+// SkillInstallDirName returns the target directory name for a skill id.
+func SkillInstallDirName(skillID string) string {
+	repoID := "skill"
+	skillName := skillID
+	if slash := strings.Index(skillID, "/"); slash >= 0 {
+		repoID = skillID[:slash]
+		skillName = skillID[slash+1:]
+	}
+
+	repoID = sanitizePathComponent(repoID)
+	skillName = sanitizePathComponent(skillName)
+	if repoID == "" {
+		repoID = "skill"
+	}
+	if skillName == "" {
+		skillName = "unknown"
+	}
+	return repoID + "--" + skillName
+}
+
+// NormalizeRepository parses and normalizes a repository reference.
+func NormalizeRepository(raw string) (Repository, error) {
+	owner, repo, err := parseGitHubRepo(raw)
+	if err != nil {
+		return Repository{}, err
+	}
+	return Repository{
+		ID:  sanitizeRepoID(owner + "-" + repo),
+		URL: fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+	}, nil
 }
 
 // --- JSON helpers ---
@@ -321,25 +446,135 @@ func cleanStrings(items []string) []string {
 	return out
 }
 
-func ensureLocalExclude(paths AppPaths) {
-	excludePath := paths.GitExcludePath
-	_ = os.MkdirAll(filepath.Dir(excludePath), 0o755)
+func normalizeRepositories(repos []Repository) []Repository {
+	if len(repos) == 0 {
+		return nil
+	}
 
-	content, _ := os.ReadFile(excludePath)
-	lines := strings.Split(string(content), "\n")
+	var out []Repository
+	seenIDs := make(map[string]bool)
+	seenURLs := make(map[string]bool)
 
-	for _, line := range lines {
-		if line == ".local/" {
-			return
+	for _, repo := range repos {
+		normalized, err := NormalizeRepository(repo.URL)
+		if err != nil {
+			continue
+		}
+
+		if repo.ID != "" {
+			normalized.ID = sanitizeRepoID(strings.ToLower(strings.TrimSpace(repo.ID)))
+		}
+		if normalized.ID == "" {
+			continue
+		}
+
+		urlKey := strings.ToLower(normalized.URL)
+		idKey := strings.ToLower(normalized.ID)
+		if seenURLs[urlKey] || seenIDs[idKey] {
+			continue
+		}
+
+		seenURLs[urlKey] = true
+		seenIDs[idKey] = true
+		out = append(out, normalized)
+	}
+
+	return out
+}
+
+func hasHiddenPathSegment(relPath string) bool {
+	parts := strings.Split(relPath, string(filepath.Separator))
+	for _, part := range parts {
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+func parseGitHubRepo(raw string) (owner string, repo string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("repository URL cannot be empty")
+	}
+
+	rest := raw
+	if strings.HasPrefix(rest, "git@github.com:") {
+		rest = strings.TrimPrefix(rest, "git@github.com:")
+	} else if strings.HasPrefix(rest, "https://github.com/") {
+		rest = strings.TrimPrefix(rest, "https://github.com/")
+	} else if strings.HasPrefix(rest, "http://github.com/") {
+		rest = strings.TrimPrefix(rest, "http://github.com/")
+	} else if strings.HasPrefix(rest, "github.com/") {
+		rest = strings.TrimPrefix(rest, "github.com/")
+	}
+
+	rest = strings.TrimSpace(rest)
+	rest = strings.TrimSuffix(rest, ".git")
+	rest = strings.Trim(rest, "/")
+
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", fmt.Errorf("invalid github repository: %s", raw)
+	}
+
+	owner = strings.ToLower(strings.TrimSpace(parts[0]))
+	repo = strings.ToLower(strings.TrimSpace(parts[1]))
+	return owner, repo, nil
+}
+
+func sanitizeRepoID(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
 		}
 	}
 
-	text := string(content)
-	if len(text) > 0 && !strings.HasSuffix(text, "\n") {
-		text += "\n"
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "repo"
 	}
-	text += ".local/\n"
-	_ = os.WriteFile(excludePath, []byte(text), 0o644)
+	return out
+}
+
+func sanitizePathComponent(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '.' ||
+			r == '_' ||
+			r == '-' {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
 }
 
 func isDigit(s string) bool {

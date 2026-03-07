@@ -14,86 +14,71 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	assert.NotEmpty(t, cfg.SelectedSkills)
+	assert.Empty(t, cfg.SelectedSkills)
 	assert.Empty(t, cfg.DisabledSkills)
 	assert.NotEmpty(t, cfg.Targets)
-	assert.Contains(t, cfg.SelectedSkills, "code-reviewer")
-	assert.Contains(t, cfg.Targets, "~/.claude/skills")
+	assert.GreaterOrEqual(t, len(cfg.Repositories), 4)
+
+	repoIDs := make([]string, 0, len(cfg.Repositories))
+	for _, repo := range cfg.Repositories {
+		repoIDs = append(repoIDs, repo.ID)
+	}
+
+	assert.Contains(t, repoIDs, "vercel-labs-agent-skills")
+	assert.Contains(t, repoIDs, "callstackincubator-agent-skills")
+	assert.Contains(t, repoIDs, "tech-leads-club-agent-skills")
+	assert.Contains(t, repoIDs, "composiohq-awesome-claude-skills")
 }
 
 func TestResolvePaths(t *testing.T) {
-	t.Run("uses explicit source repo", func(t *testing.T) {
-		repo := t.TempDir()
-		paths := ResolvePaths(repo)
+	t.Run("uses explicit workspace", func(t *testing.T) {
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
 
-		assert.Equal(t, ExpandPath(repo), paths.SourceRepo)
-		assert.Equal(t, filepath.Join(ExpandPath(repo), ".local"), paths.LocalDir)
-		assert.Equal(t, filepath.Join(ExpandPath(repo), "skills"), paths.SourceSkillDir)
+		assert.Equal(t, ExpandPath(workspace), paths.WorkspaceDir)
+		assert.Equal(t, filepath.Join(ExpandPath(workspace), ".local"), paths.LocalDir)
+		assert.Equal(t, filepath.Join(ExpandPath(workspace), ".local", "repos"), paths.RepoCacheDir)
 	})
 
-	t.Run("uses env var when explicit is empty", func(t *testing.T) {
-		repo := t.TempDir()
-		t.Setenv("SKILLCTL_SOURCE_REPO", repo)
+	t.Run("uses env var when explicit value is empty", func(t *testing.T) {
+		workspace := t.TempDir()
+		t.Setenv("SKILLCTL_WORKSPACE", workspace)
 
 		paths := ResolvePaths("")
-		assert.Equal(t, ExpandPath(repo), paths.SourceRepo)
+		assert.Equal(t, ExpandPath(workspace), paths.WorkspaceDir)
 	})
 
-	t.Run("falls back to default when arg and env are empty", func(t *testing.T) {
-		t.Setenv("SKILLCTL_SOURCE_REPO", "")
+	t.Run("falls back to default when explicit and env are empty", func(t *testing.T) {
+		t.Setenv("SKILLCTL_WORKSPACE", "")
 
 		paths := ResolvePaths("")
-		assert.Equal(t, ExpandPath(DefaultSourceRepo), paths.SourceRepo)
+		assert.Equal(t, ExpandPath(DefaultWorkspaceDir), paths.WorkspaceDir)
 	})
 }
 
 func TestEnsureSetup(t *testing.T) {
 	t.Run("bootstraps local config and state", func(t *testing.T) {
-		repo := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, "skills"), 0o755))
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git", "info"), 0o755))
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
 
-		paths := ResolvePaths(repo)
 		err := EnsureSetup(paths)
 		require.NoError(t, err)
 
 		cfgFile, err := os.ReadFile(paths.ConfigPath)
 		require.NoError(t, err)
 		assert.Contains(t, string(cfgFile), "selected_skills")
+		assert.Contains(t, string(cfgFile), "repositories")
 
 		stateFile, err := os.ReadFile(paths.StatePath)
 		require.NoError(t, err)
 		assert.Contains(t, string(stateFile), "{}")
 
-		excludeFile, err := os.ReadFile(paths.GitExcludePath)
+		info, err := os.Stat(paths.RepoCacheDir)
 		require.NoError(t, err)
-		assert.Contains(t, string(excludeFile), ".local/")
+		assert.True(t, info.IsDir())
 
-		// idempotent and should not duplicate the exclude entry
 		err = EnsureSetup(paths)
 		require.NoError(t, err)
-
-		excludeFile, err = os.ReadFile(paths.GitExcludePath)
-		require.NoError(t, err)
-		assert.Equal(t, 1, strings.Count(string(excludeFile), ".local/"))
-	})
-
-	t.Run("returns error when skills directory is missing", func(t *testing.T) {
-		repo := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
-
-		err := EnsureSetup(ResolvePaths(repo))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "skills source directory not found")
-	})
-
-	t.Run("returns error when repo is not a git directory", func(t *testing.T) {
-		repo := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, "skills"), 0o755))
-
-		err := EnsureSetup(ResolvePaths(repo))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "source repo is not a git repository")
 	})
 }
 
@@ -106,8 +91,8 @@ func TestLoadAndSaveConfig(t *testing.T) {
 	})
 
 	t.Run("load returns default on invalid json", func(t *testing.T) {
-		repo := t.TempDir()
-		paths := ResolvePaths(repo)
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
 		require.NoError(t, os.MkdirAll(paths.LocalDir, 0o755))
 		require.NoError(t, os.WriteFile(paths.ConfigPath, []byte("{"), 0o644))
 
@@ -115,15 +100,21 @@ func TestLoadAndSaveConfig(t *testing.T) {
 		assert.Equal(t, DefaultConfig(), cfg)
 	})
 
-	t.Run("normalizes selected, disabled, and targets", func(t *testing.T) {
-		repo := t.TempDir()
-		paths := ResolvePaths(repo)
+	t.Run("normalizes selected, disabled, targets, and repositories", func(t *testing.T) {
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
 		require.NoError(t, os.MkdirAll(paths.LocalDir, 0o755))
 
 		raw := Config{
 			SelectedSkills: []string{" alpha ", "beta", "alpha", " ", "Gamma"},
 			DisabledSkills: []string{"beta", "BETA", "gamma", "missing"},
 			Targets:        []string{" ~/one ", "~/two", "~/one", ""},
+			Repositories: []Repository{
+				{URL: "https://github.com/vercel-labs/agent-skills"},
+				{URL: "git@github.com:vercel-labs/agent-skills.git"},
+				{ID: "Custom_ID", URL: "github.com/callstackincubator/agent-skills"},
+				{URL: "bad/repo/format/extra"},
+			},
 		}
 		require.NoError(t, WriteJSON(paths.ConfigPath, raw))
 
@@ -131,16 +122,24 @@ func TestLoadAndSaveConfig(t *testing.T) {
 		assert.Equal(t, []string{"alpha", "beta", "Gamma"}, cfg.SelectedSkills)
 		assert.Equal(t, []string{"beta", "Gamma"}, cfg.DisabledSkills)
 		assert.Equal(t, []string{"~/one", "~/two"}, cfg.Targets)
+		require.Len(t, cfg.Repositories, 2)
+		assert.Equal(t, "vercel-labs-agent-skills", cfg.Repositories[0].ID)
+		assert.Equal(t, "https://github.com/vercel-labs/agent-skills.git", cfg.Repositories[0].URL)
+		assert.Equal(t, "custom-id", cfg.Repositories[1].ID)
+		assert.Equal(t, "https://github.com/callstackincubator/agent-skills.git", cfg.Repositories[1].URL)
 	})
 
 	t.Run("save and load round trip", func(t *testing.T) {
-		repo := t.TempDir()
-		paths := ResolvePaths(repo)
+		workspace := t.TempDir()
+		paths := ResolvePaths(workspace)
 
 		want := Config{
-			SelectedSkills: []string{"code-reviewer", "security-auditor"},
-			DisabledSkills: []string{"security-auditor"},
+			SelectedSkills: []string{"vercel-labs-agent-skills/react-best-practices"},
+			DisabledSkills: nil,
 			Targets:        []string{"~/.claude/skills", "~/.codex/skills"},
+			Repositories: []Repository{
+				{ID: "vercel-labs-agent-skills", URL: "https://github.com/vercel-labs/agent-skills.git"},
+			},
 		}
 
 		require.NoError(t, SaveConfig(paths, want))
@@ -169,17 +168,110 @@ func TestLoadAndSaveState(t *testing.T) {
 }
 
 func TestLoadAvailableSkills(t *testing.T) {
-	repo := t.TempDir()
-	paths := ResolvePaths(repo)
-	require.NoError(t, os.MkdirAll(paths.SourceSkillDir, 0o755))
+	workspace := t.TempDir()
+	paths := ResolvePaths(workspace)
+	require.NoError(t, EnsureSetup(paths))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(paths.SourceSkillDir, "zeta"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(paths.SourceSkillDir, "alpha"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(paths.SourceSkillDir, ".hidden"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(paths.SourceSkillDir, "README.md"), []byte("file"), 0o644))
+	repoA, err := NormalizeRepository("https://github.com/example/alpha")
+	require.NoError(t, err)
+	repoB, err := NormalizeRepository("https://github.com/example/beta")
+	require.NoError(t, err)
 
-	skills := LoadAvailableSkills(paths)
-	assert.Equal(t, []string{"alpha", "zeta"}, skills)
+	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoA.ID), "skills", "alpha"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoA.ID), "skills", "alpha", "SKILL.md"), []byte("alpha"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoA.ID), "nested", "beta"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoA.ID), "nested", "beta", "SKILL.md"), []byte("beta"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoA.ID), "other", "alpha"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoA.ID), "other", "alpha", "SKILL.md"), []byte("dup"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoA.ID), ".claude", "skills", "hidden"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoA.ID), ".claude", "skills", "hidden", "SKILL.md"), []byte("hidden"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoB.ID), "pkg", "gamma"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoB.ID), "pkg", "gamma", "SKILL.md"), []byte("gamma"), 0o644))
+
+	cfg := Config{Repositories: []Repository{repoA, repoB}}
+	skills := LoadAvailableSkills(paths, cfg)
+	ids := SkillIDs(skills)
+
+	assert.Len(t, ids, 4)
+	assert.Contains(t, ids, repoA.ID+"/alpha")
+	assert.Contains(t, ids, repoA.ID+"/beta")
+	assert.Contains(t, ids, repoB.ID+"/gamma")
+
+	var duplicateID string
+	for _, id := range ids {
+		if strings.HasPrefix(id, repoA.ID+"/") && strings.HasSuffix(id, "__alpha") {
+			duplicateID = id
+			break
+		}
+	}
+	assert.NotEmpty(t, duplicateID)
+}
+
+func TestNormalizeRepository(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantID  string
+		wantURL string
+		wantErr bool
+	}{
+		{
+			name:    "https",
+			in:      "https://github.com/vercel-labs/agent-skills",
+			wantID:  "vercel-labs-agent-skills",
+			wantURL: "https://github.com/vercel-labs/agent-skills.git",
+		},
+		{
+			name:    "ssh",
+			in:      "git@github.com:callstackincubator/agent-skills.git",
+			wantID:  "callstackincubator-agent-skills",
+			wantURL: "https://github.com/callstackincubator/agent-skills.git",
+		},
+		{
+			name:    "bare github path",
+			in:      "github.com/tech-leads-club/agent-skills",
+			wantID:  "tech-leads-club-agent-skills",
+			wantURL: "https://github.com/tech-leads-club/agent-skills.git",
+		},
+		{
+			name:    "invalid",
+			in:      "not-a-repo",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, err := NormalizeRepository(tt.in)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, repo.ID)
+			assert.Equal(t, tt.wantURL, repo.URL)
+		})
+	}
+}
+
+func TestSkillInstallDirName(t *testing.T) {
+	assert.Equal(t,
+		"vercel-labs-agent-skills--react-best-practices",
+		SkillInstallDirName("vercel-labs-agent-skills/react-best-practices"),
+	)
+	assert.Equal(t,
+		"skill--unknown",
+		SkillInstallDirName(""),
+	)
+	assert.Equal(t,
+		"repo--name-with-spaces",
+		SkillInstallDirName("repo/name with spaces"),
+	)
 }
 
 func TestReadWriteJSON(t *testing.T) {

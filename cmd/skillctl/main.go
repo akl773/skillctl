@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	sourceRepo := flag.String("source-repo", "", "Path to skills source repo (default: ~/.skills-curated)")
+	workspace := flag.String("workspace", "", "Path to skillctl workspace (default: ~/.skillctl)")
 	version := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
@@ -21,7 +21,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	paths := config.ResolvePaths(*sourceRepo)
+	paths := config.ResolvePaths(*workspace)
 	if err := config.EnsureSetup(paths); err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %s\n", err)
 		os.Exit(1)

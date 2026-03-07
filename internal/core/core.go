@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -14,15 +15,34 @@ import (
 
 // --- Outcome types ---
 
-// GitPullOutcome captures the result of a git pull operation.
-type GitPullOutcome struct {
-	ReturnCode int
-	Stdout     string
-	Stderr     string
+// RepoPullResult captures clone/pull output for a single repository.
+type RepoPullResult struct {
+	RepoID       string
+	RepoURL      string
+	Action       string
+	ReturnCode   int
+	Stdout       string
+	Stderr       string
+	LocalRepoDir string
 }
 
-// Success returns true if the git pull exited cleanly.
-func (o GitPullOutcome) Success() bool { return o.ReturnCode == 0 }
+// Success returns true if this repository action exited cleanly.
+func (r RepoPullResult) Success() bool { return r.ReturnCode == 0 }
+
+// GitPullOutcome captures the result of updating all configured repositories.
+type GitPullOutcome struct {
+	Results []RepoPullResult
+}
+
+// Success returns true if all repository actions exited cleanly.
+func (o GitPullOutcome) Success() bool {
+	for _, result := range o.Results {
+		if !result.Success() {
+			return false
+		}
+	}
+	return true
+}
 
 // AddOutcome captures the result of adding skills to the selection.
 type AddOutcome struct {
@@ -77,25 +97,68 @@ func (o SyncOutcome) TotalFailed() int {
 
 // --- Operations ---
 
-// RunGitPull executes git pull --ff-only on the source repository.
-func RunGitPull(paths config.AppPaths) GitPullOutcome {
-	return RunGitPullStream(paths, nil, nil)
+// RunGitPull updates all configured repositories without streaming output.
+func RunGitPull(paths config.AppPaths, repositories []config.Repository) GitPullOutcome {
+	return RunGitPullStream(paths, repositories, nil, nil)
 }
 
-// RunGitPullStream executes git pull --ff-only and streams output chunks.
-func RunGitPullStream(paths config.AppPaths, onStdout func(string), onStderr func(string)) GitPullOutcome {
-	cmd := exec.Command("git", "-C", paths.SourceRepo, "pull", "--ff-only", "--progress")
+// RunGitPullStream updates all configured repositories and streams output chunks.
+func RunGitPullStream(
+	paths config.AppPaths,
+	repositories []config.Repository,
+	onStdout func(string),
+	onStderr func(string),
+) GitPullOutcome {
+	_ = os.MkdirAll(paths.RepoCacheDir, 0o755)
+
+	var outcome GitPullOutcome
+	for _, repo := range repositories {
+		repoPath := paths.RepoPath(repo.ID)
+		action := "pull"
+
+		if !exists(repoPath) {
+			action = "clone"
+		}
+
+		if onStdout != nil {
+			onStdout(fmt.Sprintf("\n[%s] %s\n", repo.ID, strings.ToUpper(action)))
+		}
+
+		var cmd *exec.Cmd
+		if action == "clone" {
+			_ = os.MkdirAll(filepath.Dir(repoPath), 0o755)
+			cmd = exec.Command("git", "clone", "--depth", "1", "--progress", repo.URL, repoPath)
+		} else {
+			cmd = exec.Command("git", "-C", repoPath, "pull", "--ff-only", "--progress")
+		}
+
+		rc, stdout, stderr := runCommandStream(cmd, onStdout, onStderr)
+		outcome.Results = append(outcome.Results, RepoPullResult{
+			RepoID:       repo.ID,
+			RepoURL:      repo.URL,
+			Action:       action,
+			ReturnCode:   rc,
+			Stdout:       stdout,
+			Stderr:       stderr,
+			LocalRepoDir: repoPath,
+		})
+	}
+
+	return outcome
+}
+
+func runCommandStream(cmd *exec.Cmd, onStdout func(string), onStderr func(string)) (int, string, string) {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+		return 1, "", err.Error()
 	}
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+		return 1, "", err.Error()
 	}
 
 	if err := cmd.Start(); err != nil {
-		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+		return 1, "", err.Error()
 	}
 
 	var stdout, stderr strings.Builder
@@ -117,11 +180,7 @@ func RunGitPullStream(paths config.AppPaths, onStdout func(string), onStderr fun
 		}
 	}
 
-	return GitPullOutcome{
-		ReturnCode: rc,
-		Stdout:     stdout.String(),
-		Stderr:     stderr.String(),
-	}
+	return rc, stdout.String(), stderr.String()
 }
 
 func copyStream(r io.Reader, dst *strings.Builder, onChunk func(string), wg *sync.WaitGroup) {
@@ -236,7 +295,8 @@ func RemoveSelectedSkills(cfg *config.Config, requested []string) RemoveOutcome 
 	for _, targetRaw := range cfg.Targets {
 		targetPath := config.ExpandPath(targetRaw)
 		for skill := range removeSet {
-			skillPath := filepath.Join(targetPath, skill)
+			installDir := config.SkillInstallDirName(skill)
+			skillPath := filepath.Join(targetPath, installDir)
 			if exists(skillPath) {
 				removePath(skillPath)
 				outcome.RemovedPaths = append(outcome.RemovedPaths, config.CompactPath(skillPath))
@@ -248,19 +308,20 @@ func RemoveSelectedSkills(cfg *config.Config, requested []string) RemoveOutcome 
 }
 
 // SyncSelectedSkills rsyncs selected skills to all configured targets.
-func SyncSelectedSkills(paths config.AppPaths, cfg config.Config, available []string) SyncOutcome {
-	availableSet := make(map[string]bool)
-	for _, s := range available {
-		availableSet[s] = true
+func SyncSelectedSkills(cfg config.Config, available []config.AvailableSkill) SyncOutcome {
+	availableByID := make(map[string]config.AvailableSkill, len(available))
+	for _, skill := range available {
+		availableByID[skill.ID] = skill
 	}
 
-	var syncable []string
+	var syncable []config.AvailableSkill
 	var missing []string
-	for _, s := range cfg.SelectedSkills {
-		if availableSet[s] {
-			syncable = append(syncable, s)
+	for _, skillID := range cfg.SelectedSkills {
+		skill, ok := availableByID[skillID]
+		if ok {
+			syncable = append(syncable, skill)
 		} else {
-			missing = append(missing, s)
+			missing = append(missing, skillID)
 		}
 	}
 
@@ -279,16 +340,15 @@ func SyncSelectedSkills(paths config.AppPaths, cfg config.Config, available []st
 		}
 
 		for _, skill := range syncable {
-			src := filepath.Join(paths.SourceSkillDir, skill)
-			dst := filepath.Join(targetPath, skill)
+			dst := filepath.Join(targetPath, config.SkillInstallDirName(skill.ID))
 			_ = os.MkdirAll(dst, 0o755)
 
-			cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/")
+			cmd := exec.Command("rsync", "-a", "--delete", skill.SourcePath+"/", dst+"/")
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				result.Failed[skill] = strings.TrimSpace(string(out))
+				result.Failed[skill.ID] = strings.TrimSpace(string(out))
 			} else {
-				result.Synced = append(result.Synced, skill)
+				result.Synced = append(result.Synced, skill.ID)
 			}
 		}
 

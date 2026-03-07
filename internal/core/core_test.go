@@ -60,25 +60,28 @@ func TestAddRequestedSkills(t *testing.T) {
 func TestRemoveSelectedSkills(t *testing.T) {
 	t.Run("removes selected skills, keeps disabled aligned, and deletes target paths", func(t *testing.T) {
 		target := t.TempDir()
-		alphaPath := filepath.Join(target, "Alpha")
-		betaPath := filepath.Join(target, "beta")
+		alphaID := "repo/Alpha"
+		betaID := "repo/beta"
+		alphaPath := filepath.Join(target, config.SkillInstallDirName(alphaID))
+		betaPath := filepath.Join(target, config.SkillInstallDirName(betaID))
 
 		require.NoError(t, os.MkdirAll(alphaPath, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(alphaPath, "README.md"), []byte("alpha"), 0o644))
-		require.NoError(t, os.WriteFile(betaPath, []byte("beta"), 0o644))
+		require.NoError(t, os.MkdirAll(betaPath, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(betaPath, "README.md"), []byte("beta"), 0o644))
 
 		cfg := config.Config{
-			SelectedSkills: []string{"Alpha", "beta"},
-			DisabledSkills: []string{"Alpha", "beta"},
+			SelectedSkills: []string{alphaID, betaID},
+			DisabledSkills: []string{alphaID, betaID},
 			Targets:        []string{target},
 		}
 
-		outcome := RemoveSelectedSkills(&cfg, []string{"alpha"})
+		outcome := RemoveSelectedSkills(&cfg, []string{"REPO/alpha"})
 
-		assert.Equal(t, []string{"Alpha"}, outcome.RemovedFromSelected)
+		assert.Equal(t, []string{alphaID}, outcome.RemovedFromSelected)
 		assert.Empty(t, outcome.NotSelected)
-		assert.Equal(t, []string{"beta"}, cfg.SelectedSkills)
-		assert.Equal(t, []string{"beta"}, cfg.DisabledSkills)
+		assert.Equal(t, []string{betaID}, cfg.SelectedSkills)
+		assert.Equal(t, []string{betaID}, cfg.DisabledSkills)
 		assert.ElementsMatch(t, []string{alphaPath}, outcome.RemovedPaths)
 		assert.False(t, exists(alphaPath))
 		assert.True(t, exists(betaPath))
@@ -102,20 +105,20 @@ func TestRemoveSelectedSkills(t *testing.T) {
 
 	t.Run("supports case-insensitive removal and sorts removed names", func(t *testing.T) {
 		target := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(target, "beta"), 0o755))
-		require.NoError(t, os.MkdirAll(filepath.Join(target, "gamma"), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Join(target, config.SkillInstallDirName("repo/beta")), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Join(target, config.SkillInstallDirName("repo/gamma")), 0o755))
 
 		cfg := config.Config{
-			SelectedSkills: []string{"gamma", "beta", "alpha"},
-			DisabledSkills: []string{"gamma", "alpha"},
+			SelectedSkills: []string{"repo/gamma", "repo/beta", "repo/alpha"},
+			DisabledSkills: []string{"repo/gamma", "repo/alpha"},
 			Targets:        []string{target},
 		}
 
-		outcome := RemoveSelectedSkills(&cfg, []string{"BETA", "gamma"})
+		outcome := RemoveSelectedSkills(&cfg, []string{"REPO/BETA", "repo/gamma"})
 
-		assert.Equal(t, []string{"beta", "gamma"}, outcome.RemovedFromSelected)
-		assert.Equal(t, []string{"alpha"}, cfg.SelectedSkills)
-		assert.Equal(t, []string{"alpha"}, cfg.DisabledSkills)
+		assert.Equal(t, []string{"repo/beta", "repo/gamma"}, outcome.RemovedFromSelected)
+		assert.Equal(t, []string{"repo/alpha"}, cfg.SelectedSkills)
+		assert.Equal(t, []string{"repo/alpha"}, cfg.DisabledSkills)
 	})
 }
 
@@ -165,8 +168,44 @@ func TestClosestMatches(t *testing.T) {
 }
 
 func TestGitPullOutcomeSuccess(t *testing.T) {
-	assert.True(t, GitPullOutcome{ReturnCode: 0}.Success())
-	assert.False(t, GitPullOutcome{ReturnCode: 1}.Success())
+	assert.True(t, GitPullOutcome{}.Success())
+	assert.True(t, GitPullOutcome{Results: []RepoPullResult{{RepoID: "a", ReturnCode: 0}}}.Success())
+	assert.False(t, GitPullOutcome{Results: []RepoPullResult{{RepoID: "a", ReturnCode: 1}}}.Success())
+}
+
+func TestSyncSelectedSkills(t *testing.T) {
+	t.Run("reports missing selected skill ids", func(t *testing.T) {
+		cfg := config.Config{SelectedSkills: []string{"repo/missing"}, Targets: []string{t.TempDir()}}
+		outcome := SyncSelectedSkills(cfg, nil)
+
+		assert.Equal(t, []string{"repo/missing"}, outcome.MissingInSource)
+		assert.Empty(t, outcome.TargetResults)
+	})
+
+	t.Run("syncs available skill to namespaced target directory", func(t *testing.T) {
+		target := t.TempDir()
+		source := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("content"), 0o644))
+
+		skill := config.AvailableSkill{
+			ID:         "repo/alpha",
+			RepoID:     "repo",
+			Name:       "alpha",
+			SourcePath: source,
+		}
+
+		cfg := config.Config{
+			SelectedSkills: []string{"repo/alpha"},
+			Targets:        []string{target},
+		}
+
+		outcome := SyncSelectedSkills(cfg, []config.AvailableSkill{skill})
+		require.Len(t, outcome.TargetResults, 1)
+		assert.Equal(t, []string{"repo/alpha"}, outcome.TargetResults[0].Synced)
+
+		installedPath := filepath.Join(target, config.SkillInstallDirName("repo/alpha"), "SKILL.md")
+		assert.True(t, exists(installedPath))
+	})
 }
 
 func TestSyncOutcomeTotals(t *testing.T) {
