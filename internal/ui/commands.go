@@ -13,6 +13,8 @@ type commandResult struct {
 	Quit   bool
 	Clear  bool
 	Cmd    tea.Cmd
+	// KeepInput keeps the current input field value unchanged after command run.
+	KeepInput bool
 }
 
 type commandDef struct {
@@ -92,13 +94,14 @@ func builtInCommands() []commandDef {
 		{
 			Name:        "add",
 			Aliases:     []string{"install"},
-			Description: "Add selected skills by name or number",
-			Usage:       "/add <name|index[,name|index...]>",
-			Examples:    []string{"/add vercel-labs-agent-skills/react-best-practices", "/add 1,2,3"},
+			Description: "Add skills via picker, name, or number",
+			Usage:       "/add [name|index[,name|index...]]",
+			Examples:    []string{"/add", "/add vercel-labs-agent-skills/react-best-practices", "/add 1,2,3"},
 			Run: func(m *Model, args string) commandResult {
 				args = strings.TrimSpace(args)
 				if args == "" {
-					return commandResult{Output: errorStyle.Render("Usage: /add <name or index list>")}
+					m.enterSkillPicker()
+					return commandResult{KeepInput: true}
 				}
 				return commandResult{Output: m.actionAddSkill(args)}
 			},

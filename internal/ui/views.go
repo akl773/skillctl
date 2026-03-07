@@ -145,7 +145,9 @@ func (m Model) renderChatWorkspace() string {
 		parts = append(parts, "")
 	}
 	parts = append(parts, inputRow)
-	if dropdown := m.renderCommandDropdown(innerWidth); dropdown != "" {
+	if dropdown := m.renderSkillPickerDropdown(innerWidth); dropdown != "" {
+		parts = append(parts, dropdown)
+	} else if dropdown := m.renderCommandDropdown(innerWidth); dropdown != "" {
 		parts = append(parts, dropdown)
 	}
 	if !tiny {
@@ -229,7 +231,7 @@ func (m Model) renderInputRow(width int) string {
 	)
 
 	value := strings.TrimSpace(m.commandInput.Value())
-	if value != "" && !hasCommandPrefix(value) {
+	if !m.skillPickerOpen && value != "" && !hasCommandPrefix(value) {
 		line += invalidInputStyle.Render("  start with /")
 	}
 
@@ -274,17 +276,100 @@ func (m Model) renderCommandDropdown(width int) string {
 	return dropdownStyle.Width(width).Render(content)
 }
 
+func (m Model) renderSkillPickerDropdown(width int) string {
+	if !m.skillPickerOpen {
+		return ""
+	}
+
+	visible := m.visibleSkillMatches()
+	displayCount := min(len(visible), m.maxDropdownItems())
+	lineWidth := width - 2
+	if lineWidth < 6 {
+		lineWidth = 6
+	}
+
+	query := strings.TrimSpace(m.commandInput.Value())
+	header := "🔍 Skills"
+	if query != "" {
+		header = fmt.Sprintf("🔍 %d match(es) for %q", len(m.skillMatches), query)
+	} else {
+		header = fmt.Sprintf("🔍 %d skill(s)", len(m.skillMatches))
+	}
+
+	lines := make([]string, 0, displayCount+4)
+	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
+
+	if len(m.available) == 0 {
+		lines = append(lines, warnStyle.Render(truncateASCII(" No skills available. Run /pull first.", lineWidth)))
+	} else if displayCount == 0 {
+		lines = append(lines, warnStyle.Render(truncateASCII(" No matching skills.", lineWidth)))
+	} else {
+		for i := 0; i < displayCount; i++ {
+			match := visible[i]
+			marker := " "
+			if match.Selected {
+				marker = "*"
+			}
+
+			prefix := fmt.Sprintf(" %s %4d. ", marker, match.CatalogIndex)
+			name := skillDisplayName(match.Skill)
+			namespace := skillNamespace(match.Skill)
+
+			nameWidth := lineWidth - len(prefix)
+			if namespace != "" {
+				namespaceWidth := max(10, min(34, lineWidth/3))
+				namespace = truncateASCII(namespace, namespaceWidth)
+				nameWidth = lineWidth - len(prefix) - len(namespace) - 2
+				if nameWidth < 8 {
+					nameWidth = 8
+					namespace = truncateASCII(namespace, max(0, lineWidth-len(prefix)-nameWidth-2))
+				}
+			}
+
+			name = truncateASCII(name, nameWidth)
+			plain := prefix + name
+			styled := plain
+			if namespace != "" {
+				plain += "  " + namespace
+				styled += "  " + mutedStyle.Render(namespace)
+			}
+			plain = truncateASCII(plain, lineWidth)
+			if i == m.skillCursor {
+				lines = append(lines, activeItemStyle.Render(plain))
+			} else {
+				lines = append(lines, paletteItemStyle.Render(styled))
+			}
+		}
+
+		if len(m.skillMatches) > displayCount {
+			more := fmt.Sprintf(" ... and %d more", len(m.skillMatches)-displayCount)
+			lines = append(lines, mutedStyle.Render(truncateASCII(more, lineWidth)))
+		}
+	}
+
+	lines = append(lines, usageStyle.Render(truncateASCII(" enter add  esc cancel", lineWidth)))
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if m.tinyLayout() {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+	return dropdownStyle.Width(width).Render(content)
+}
+
 func (m Model) renderHelpBar(width int) string {
 	if m.tinyLayout() {
 		help := "/ commands  enter run  ctrl+c quit"
-		if m.paletteOpen() {
+		if m.skillPickerOpen {
+			help = "type search  up/down pick  enter add"
+		} else if m.paletteOpen() {
 			help = "up/down select  tab fill  enter run"
 		}
 		return helpStyle.Width(width).Render(truncateASCII(help, width))
 	}
 
 	help := "type / for commands  up/down history  pgup/pgdn scroll  ctrl+c quit"
-	if m.paletteOpen() {
+	if m.skillPickerOpen {
+		help = "type to search  up/down select  enter add  esc cancel  ctrl+c quit"
+	} else if m.paletteOpen() {
 		help = "up/down select  tab autocomplete  enter run  esc reset  ctrl+c quit"
 	}
 	if m.gitPullRunning {
@@ -422,6 +507,28 @@ func countDirs(path string) int {
 		}
 	}
 	return n
+}
+
+func skillDisplayName(skill config.AvailableSkill) string {
+	name := strings.TrimSpace(skill.Name)
+	if name != "" {
+		return name
+	}
+	if slash := strings.LastIndex(skill.ID, "/"); slash >= 0 && slash+1 < len(skill.ID) {
+		return skill.ID[slash+1:]
+	}
+	return skill.ID
+}
+
+func skillNamespace(skill config.AvailableSkill) string {
+	ns := strings.TrimSpace(skill.RepoID)
+	if ns != "" {
+		return ns
+	}
+	if slash := strings.Index(skill.ID, "/"); slash > 0 {
+		return skill.ID[:slash]
+	}
+	return ""
 }
 
 func truncateASCII(s string, maxLen int) string {

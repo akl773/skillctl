@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -176,6 +177,121 @@ func (m *Model) actionSearch(query string) string {
 	sb.WriteString("\n")
 	sb.WriteString(mutedStyle.Render("Use /add <skill-id> or /add <catalog-number> to add a result."))
 	return sb.String()
+}
+
+func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
+	query := strings.ToLower(strings.TrimSpace(rawQuery))
+
+	selectedSet := make(map[string]bool, len(m.cfg.SelectedSkills))
+	for _, skillID := range m.cfg.SelectedSkills {
+		selectedSet[strings.ToLower(skillID)] = true
+	}
+
+	type scoredSkillMatch struct {
+		match skillMatch
+		score int
+	}
+
+	scored := make([]scoredSkillMatch, 0, len(m.available))
+	for i, skill := range m.available {
+		score := 100
+		if query != "" {
+			computed, ok := scoreSkillSearch(query, skill)
+			if !ok {
+				continue
+			}
+			score = computed
+		}
+
+		scored = append(scored, scoredSkillMatch{
+			match: skillMatch{
+				Skill:        skill,
+				CatalogIndex: i + 1,
+				Selected:     selectedSet[strings.ToLower(skill.ID)],
+			},
+			score: score,
+		})
+	}
+
+	if query != "" {
+		sort.SliceStable(scored, func(i, j int) bool {
+			if scored[i].score != scored[j].score {
+				return scored[i].score < scored[j].score
+			}
+			if scored[i].match.Skill.Name != scored[j].match.Skill.Name {
+				return scored[i].match.Skill.Name < scored[j].match.Skill.Name
+			}
+			return scored[i].match.Skill.ID < scored[j].match.Skill.ID
+		})
+	}
+
+	matches := make([]skillMatch, 0, len(scored))
+	for _, item := range scored {
+		matches = append(matches, item.match)
+	}
+
+	return matches
+}
+
+func scoreSkillSearch(query string, skill config.AvailableSkill) (int, bool) {
+	best := 0
+	hasMatch := false
+
+	consider := func(text string, weight int) {
+		score, ok := scoreFuzzyText(query, strings.ToLower(text))
+		if !ok {
+			return
+		}
+		total := score + weight
+		if !hasMatch || total < best {
+			best = total
+			hasMatch = true
+		}
+	}
+
+	consider(skill.Name, 0)
+	consider(skill.ID, 2)
+	consider(skill.RepoID, 3)
+
+	return best, hasMatch
+}
+
+func scoreFuzzyText(query, text string) (int, bool) {
+	if query == "" {
+		return 100, true
+	}
+	if text == "" {
+		return 0, false
+	}
+
+	if text == query {
+		return 0, true
+	}
+	if strings.HasPrefix(text, query) {
+		return 1, true
+	}
+	if idx := strings.Index(text, query); idx >= 0 {
+		return 2 + idx, true
+	}
+
+	qi := 0
+	last := -1
+	gapPenalty := 0
+	for i := 0; i < len(text) && qi < len(query); i++ {
+		if text[i] != query[qi] {
+			continue
+		}
+		if last >= 0 {
+			gapPenalty += i - last - 1
+		}
+		last = i
+		qi++
+	}
+	if qi != len(query) {
+		return 0, false
+	}
+
+	return 10 + gapPenalty, true
 }
 
 func (m *Model) actionAddSkill(raw string) string {

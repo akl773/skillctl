@@ -14,8 +14,10 @@ import (
 const maxPaletteItems = 24
 
 const (
-	defaultContentWidth = 90
-	minContentWidth     = 10
+	defaultContentWidth     = 90
+	minContentWidth         = 10
+	defaultInputPlaceholder = "Type / for commands..."
+	skillPickerPlaceholder  = "Type to search skills..."
 )
 
 type chatMessageType string
@@ -32,6 +34,12 @@ type chatMessage struct {
 	Type      chatMessageType
 	Content   string
 	Timestamp time.Time
+}
+
+type skillMatch struct {
+	Skill        config.AvailableSkill
+	CatalogIndex int
+	Selected     bool
 }
 
 // Model is the root bubbletea model.
@@ -60,6 +68,10 @@ type Model struct {
 	matches       []commandMatch
 	paletteCursor int
 
+	skillPickerOpen bool
+	skillMatches    []skillMatch
+	skillCursor     int
+
 	history      []string
 	historyIndex int
 }
@@ -70,7 +82,7 @@ func NewModel(paths config.AppPaths) Model {
 	ti.Prompt = ""
 	ti.CharLimit = 512
 	ti.Width = 72
-	ti.Placeholder = "Type / for commands..."
+	ti.Placeholder = defaultInputPlaceholder
 	ti.SetValue("")
 	ti.CursorEnd()
 	_ = ti.Focus()
@@ -166,6 +178,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.skillPickerOpen {
+		return m.handleSkillPickerKey(msg)
+	}
+
 	switch key {
 	case "enter":
 		return m.submitCommand()
@@ -220,6 +236,45 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "enter":
+		m.addSkillFromPicker()
+		m.historyIndex = len(m.history)
+		m.applyLayout(true)
+		return m, nil
+	case "up":
+		m.moveSkillPicker(-1)
+		m.applyLayout(false)
+		return m, nil
+	case "down":
+		m.moveSkillPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "tab":
+		m.moveSkillPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "pgup", "pgdown", "home", "end":
+		var cmd tea.Cmd
+		m.chatViewport, cmd = m.chatViewport.Update(msg)
+		return m, cmd
+	case "esc":
+		m.exitSkillPicker(true)
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	m.recomputeSkillMatches()
+	m.applyLayout(false)
+	return m, cmd
+}
+
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
@@ -227,6 +282,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
+		if m.skillPickerOpen {
+			m.moveSkillPicker(-1)
+			return m, nil
+		}
 		if m.paletteOpen() {
 			m.movePalette(-1)
 			return m, nil
@@ -235,6 +294,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.chatViewport, cmd = m.chatViewport.Update(msg)
 		return m, cmd
 	case tea.MouseButtonWheelDown:
+		if m.skillPickerOpen {
+			m.moveSkillPicker(1)
+			return m, nil
+		}
 		if m.paletteOpen() {
 			m.movePalette(1)
 			return m, nil
@@ -321,8 +384,11 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 		m.gitPullMessageID = -1
 	}
 
-	m.commandInput.SetValue("")
-	m.commandInput.CursorEnd()
+	if !result.KeepInput {
+		m.commandInput.Placeholder = defaultInputPlaceholder
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
 	m.recomputeMatches()
 	m.historyIndex = len(m.history)
 	m.applyLayout(true)
@@ -336,6 +402,13 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) recomputeMatches() {
+	if m.skillPickerOpen {
+		m.matches = nil
+		m.paletteCursor = 0
+		m.recomputeSkillMatches()
+		return
+	}
+
 	if !hasCommandPrefix(m.commandInput.Value()) {
 		m.matches = nil
 		m.paletteCursor = 0
@@ -372,7 +445,21 @@ func (m Model) visibleMatches() []commandMatch {
 	return m.matches[:maxPaletteItems]
 }
 
+func (m Model) visibleSkillMatches() []skillMatch {
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if len(m.skillMatches) <= limit {
+		return m.skillMatches
+	}
+	return m.skillMatches[:limit]
+}
+
 func (m Model) paletteOpen() bool {
+	if m.skillPickerOpen {
+		return false
+	}
 	return hasCommandPrefix(m.commandInput.Value()) && len(m.visibleMatches()) > 0
 }
 
@@ -388,6 +475,86 @@ func (m *Model) movePalette(delta int) {
 	if m.paletteCursor >= len(visible) {
 		m.paletteCursor = 0
 	}
+}
+
+func (m *Model) moveSkillPicker(delta int) {
+	visible := m.visibleSkillMatches()
+	if len(visible) == 0 {
+		return
+	}
+
+	m.skillCursor += delta
+	if m.skillCursor < 0 {
+		m.skillCursor = len(visible) - 1
+	}
+	if m.skillCursor >= len(visible) {
+		m.skillCursor = 0
+	}
+}
+
+func (m *Model) enterSkillPicker() {
+	m.skillPickerOpen = true
+	m.skillCursor = 0
+	m.commandInput.Placeholder = skillPickerPlaceholder
+	m.commandInput.SetValue("")
+	m.commandInput.CursorEnd()
+	m.recomputeSkillMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) exitSkillPicker(clearInput bool) {
+	m.skillPickerOpen = false
+	m.skillMatches = nil
+	m.skillCursor = 0
+	m.commandInput.Placeholder = defaultInputPlaceholder
+	if clearInput {
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
+	m.recomputeMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) recomputeSkillMatches() {
+	m.skillMatches = m.matchAvailableSkills(m.commandInput.Value())
+	visible := m.visibleSkillMatches()
+	if len(visible) == 0 {
+		m.skillCursor = 0
+		return
+	}
+	if m.skillCursor < 0 {
+		m.skillCursor = 0
+	}
+	if m.skillCursor >= len(visible) {
+		m.skillCursor = len(visible) - 1
+	}
+}
+
+func (m *Model) addSkillFromPicker() {
+	visible := m.visibleSkillMatches()
+	if len(visible) == 0 {
+		if len(m.available) == 0 {
+			m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available. Run /pull first."))
+		} else {
+			m.addChatMessage(chatMessageInfo, warnStyle.Render("No matching skills found."))
+		}
+		m.exitSkillPicker(true)
+		return
+	}
+
+	if m.skillCursor < 0 || m.skillCursor >= len(visible) {
+		m.skillCursor = 0
+	}
+
+	chosen := visible[m.skillCursor]
+	cmdText := "/add " + chosen.Skill.ID
+	m.appendHistory(cmdText)
+	m.addChatMessage(chatMessageCommand, cmdText)
+	if output := m.actionAddSkill(chosen.Skill.ID); strings.TrimSpace(output) != "" {
+		m.addChatMessage(chatMessageOutput, output)
+	}
+
+	m.exitSkillPicker(true)
 }
 
 func (m *Model) autocompleteSelected() {
@@ -559,7 +726,9 @@ func (m Model) computeViewportHeight() int {
 	if m.compactLayout() {
 		reserved = 6
 	}
-	if m.paletteOpen() {
+	if m.skillPickerOpen {
+		reserved += len(m.visibleSkillMatches()) + 3
+	} else if m.paletteOpen() {
 		reserved += min(len(m.visibleMatches()), m.maxDropdownItems()) + 2
 	}
 
@@ -646,4 +815,9 @@ func (m *Model) refresh() {
 	m.cfg = config.LoadConfig(m.paths)
 	m.available = config.LoadAvailableSkills(m.paths, m.cfg)
 	m.availableIDs = config.SkillIDs(m.available)
+	if m.skillPickerOpen {
+		m.recomputeSkillMatches()
+		return
+	}
+	m.recomputeMatches()
 }
