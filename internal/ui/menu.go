@@ -9,7 +9,7 @@ import (
 	"akhilsingh.in/skillctl/internal/config"
 )
 
-const maxPaletteItems = 8
+const maxPaletteItems = 24
 
 // Model is the root bubbletea model.
 type Model struct {
