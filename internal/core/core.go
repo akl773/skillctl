@@ -1,11 +1,13 @@
 package core
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"akhilsingh.in/skillctl/internal/config"
 )
@@ -77,8 +79,35 @@ func (o SyncOutcome) TotalFailed() int {
 
 // RunGitPull executes git pull --ff-only on the source repository.
 func RunGitPull(paths config.AppPaths) GitPullOutcome {
+	return RunGitPullStream(paths, nil, nil)
+}
+
+// RunGitPullStream executes git pull --ff-only and streams output chunks.
+func RunGitPullStream(paths config.AppPaths, onStdout func(string), onStderr func(string)) GitPullOutcome {
 	cmd := exec.Command("git", "-C", paths.SourceRepo, "pull", "--ff-only", "--progress")
-	out, err := cmd.CombinedOutput()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return GitPullOutcome{ReturnCode: 1, Stderr: err.Error()}
+	}
+
+	var stdout, stderr strings.Builder
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go copyStream(stdoutPipe, &stdout, onStdout, &wg)
+	go copyStream(stderrPipe, &stderr, onStderr, &wg)
+
+	err = cmd.Wait()
+	wg.Wait()
+
 	rc := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -87,10 +116,39 @@ func RunGitPull(paths config.AppPaths) GitPullOutcome {
 			rc = 1
 		}
 	}
+
 	return GitPullOutcome{
 		ReturnCode: rc,
-		Stdout:     string(out),
-		Stderr:     "",
+		Stdout:     stdout.String(),
+		Stderr:     stderr.String(),
+	}
+}
+
+func copyStream(r io.Reader, dst *strings.Builder, onChunk func(string), wg *sync.WaitGroup) {
+	defer wg.Done()
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+			dst.WriteString(chunk)
+			if onChunk != nil {
+				onChunk(chunk)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			if dst.Len() == 0 || !strings.HasSuffix(dst.String(), "\n") {
+				dst.WriteString("\n")
+			}
+			dst.WriteString(err.Error())
+			if onChunk != nil {
+				onChunk("\n" + err.Error())
+			}
+			return
+		}
 	}
 }
 

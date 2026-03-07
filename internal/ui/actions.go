@@ -12,6 +12,18 @@ import (
 
 // --- Action handlers ---
 
+func (m *Model) actionGitPull() commandResult {
+	if m.gitPullRunning {
+		return commandResult{Output: warnStyle.Render("A git pull is already running.")}
+	}
+
+	m.gitPullRunning = true
+	m.gitPullOutput.Reset()
+	m.gitPullOutput.WriteString(infoStyle.Render("Running git pull --ff-only --progress...") + "\n")
+
+	return commandResult{Output: m.gitPullOutput.String(), Cmd: startGitPullStreamCmd(m.paths)}
+}
+
 func (m *Model) actionListSelected() string {
 	if len(m.cfg.SelectedSkills) == 0 {
 		return warnStyle.Render("No skills selected yet.")

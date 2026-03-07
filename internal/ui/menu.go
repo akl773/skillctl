@@ -30,6 +30,9 @@ type Model struct {
 	mode           int
 	outputViewport viewport.Model
 	lastCommand    string
+	gitPullRunning bool
+	gitPullEvents  <-chan tea.Msg
+	gitPullOutput  strings.Builder
 
 	commandInput  textinput.Model
 	commands      []commandDef
@@ -88,6 +91,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case gitPullStreamStartedMsg:
+		m.gitPullEvents = msg.events
+		if m.gitPullEvents == nil {
+			m.gitPullRunning = false
+			return m, nil
+		}
+		return m, waitForGitPullEventCmd(m.gitPullEvents)
+
+	case gitPullChunkMsg:
+		if msg.isStderr {
+			m.gitPullOutput.WriteString(mutedStyle.Render(msg.chunk))
+		} else {
+			m.gitPullOutput.WriteString(msg.chunk)
+		}
+		m.output = m.gitPullOutput.String()
+		m.outputViewport.SetContent(m.output)
+		m.outputViewport.GotoBottom()
+		if m.gitPullEvents != nil {
+			return m, waitForGitPullEventCmd(m.gitPullEvents)
+		}
+		return m, nil
+
+	case gitPullDoneMsg:
+		if msg.outcome.Success() {
+			m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repository is up to date."))
+			m.refresh()
+		} else {
+			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: git pull failed. Resolve git issues before syncing."))
+		}
+		m.output = m.gitPullOutput.String()
+		m.outputViewport.SetContent(m.output)
+		m.outputViewport.GotoBottom()
+		m.gitPullRunning = false
+		m.gitPullEvents = nil
+		return m, nil
 	}
 
 	return m, nil
@@ -247,7 +286,7 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	return m, nil
+	return m, result.Cmd
 }
 
 func (m *Model) normalizeInput() {

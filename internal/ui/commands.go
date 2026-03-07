@@ -40,18 +40,16 @@ func builtInCommands() []commandDef {
 				return commandResult{Output: m.renderHelp(args)}
 			},
 		},
-		/*
-			{
-				Name:        "pull",
-				Aliases:     []string{"update", "git pull"},
-				Description: "Pull latest changes in source repo",
-				Usage:       "/pull",
-				Examples:    []string{"/pull"},
-				Run: func(m *Model, args string) commandResult {
-					return m.actionGitPull()
-				},
+		{
+			Name:        "pull",
+			Aliases:     []string{"update", "git pull"},
+			Description: "Pull latest changes in source repo",
+			Usage:       "/pull",
+			Examples:    []string{"/pull"},
+			Run: func(m *Model, args string) commandResult {
+				return m.actionGitPull()
 			},
-		*/
+		},
 		{
 			Name:        "list",
 			Aliases:     []string{"ls"},
