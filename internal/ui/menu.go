@@ -3,7 +3,6 @@ package ui
 import (
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -20,22 +19,6 @@ const (
 	defaultInputPlaceholder = "Type / for commands..."
 	skillPickerPlaceholder  = "Type to search skills..."
 )
-
-type chatMessageType string
-
-const (
-	chatMessageCommand chatMessageType = "command"
-	chatMessageOutput  chatMessageType = "output"
-	chatMessageInfo    chatMessageType = "info"
-	chatMessageError   chatMessageType = "error"
-)
-
-type chatMessage struct {
-	ID        int
-	Type      chatMessageType
-	Content   string
-	Timestamp time.Time
-}
 
 type skillMatch struct {
 	Skill        config.AvailableSkill
@@ -56,14 +39,13 @@ type Model struct {
 	quitting     bool
 
 	chatViewport  viewport.Model
-	chatMessages  []chatMessage
-	nextMessageID int
+	outputLabel   string
+	outputContent string
 
-	gitPullRunning   bool
-	gitPullSilent    bool
-	gitPullEvents    <-chan tea.Msg
-	gitPullOutput    *strings.Builder
-	gitPullMessageID int
+	gitPullRunning bool
+	gitPullSilent  bool
+	gitPullEvents  <-chan tea.Msg
+	gitPullOutput  *strings.Builder
 
 	commandInput  textinput.Model
 	commands      []commandDef
@@ -98,17 +80,16 @@ func NewModel(paths config.AppPaths) Model {
 	availableIDs := config.SkillIDs(available)
 
 	m := Model{
-		paths:            paths,
-		cfg:              cfg,
-		available:        available,
-		availableIDs:     availableIDs,
-		contentWidth:     defaultContentWidth,
-		chatViewport:     vp,
-		gitPullOutput:    new(strings.Builder),
-		gitPullMessageID: -1,
-		commandInput:     ti,
-		commands:         builtInCommands(),
-		historyIndex:     0,
+		paths:         paths,
+		cfg:           cfg,
+		available:     available,
+		availableIDs:  availableIDs,
+		contentWidth:  defaultContentWidth,
+		chatViewport:  vp,
+		gitPullOutput: new(strings.Builder),
+		commandInput:  ti,
+		commands:      builtInCommands(),
+		historyIndex:  0,
 	}
 	m.recomputeMatches()
 	m.refreshChatViewport(false)
@@ -154,7 +135,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gitPullSilent = true
 		m.gitPullEvents = nil
 		m.gitPullOutput.Reset()
-		m.gitPullMessageID = -1
 		return m, startGitPullStreamCmd(m.paths, m.cfg.Repositories)
 
 	case gitPullStreamStartedMsg:
@@ -178,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.gitPullOutput.WriteString(msg.chunk)
 		}
-		m.upsertGitPullMessage(m.gitPullOutput.String())
+		m.updateOutputContent(m.gitPullOutput.String())
 		if m.gitPullEvents != nil {
 			return m, waitForGitPullEventCmd(m.gitPullEvents)
 		}
@@ -189,21 +169,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.outcome.Success() {
 			if !silent {
 				m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repositories are up to date."))
-				m.upsertGitPullMessage(m.gitPullOutput.String())
+				m.updateOutputContent(m.gitPullOutput.String())
 			}
 			m.refresh()
 		} else if silent {
-			m.addChatMessage(chatMessageError, errorStyle.Render("Background repository sync failed. Run /pull to inspect details and retry."))
+			m.setOutput("", errorStyle.Render("Background repository sync failed. Run /pull to inspect details and retry."))
 		} else {
 			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: one or more repository updates failed. Resolve git issues before syncing."))
-			m.upsertGitPullMessage(m.gitPullOutput.String())
+			m.updateOutputContent(m.gitPullOutput.String())
 		}
 		m.gitPullRunning = false
 		m.gitPullSilent = false
 		m.gitPullEvents = nil
-		if !m.gitPullRunning {
-			m.gitPullMessageID = -1
-		}
 		return m, nil
 	}
 
@@ -264,11 +241,16 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatViewport, cmd = m.chatViewport.Update(msg)
 		return m, cmd
 	case "esc":
-		m.commandInput.SetValue("")
-		m.commandInput.CursorEnd()
-		m.historyIndex = len(m.history)
-		m.recomputeMatches()
-		m.applyLayout(false)
+		if m.commandInput.Value() != "" {
+			m.commandInput.SetValue("")
+			m.commandInput.CursorEnd()
+			m.historyIndex = len(m.history)
+			m.recomputeMatches()
+			m.applyLayout(false)
+		} else {
+			m.clearOutput()
+			m.applyLayout(false)
+		}
 		return m, nil
 	}
 
@@ -366,13 +348,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 	raw := strings.TrimSpace(m.commandInput.Value())
 	if raw == "" {
-		m.addChatMessage(chatMessageInfo, "Type / to open commands.")
+		m.setOutput("", "Type / to open commands.")
 		m.applyLayout(true)
 		return m, nil
 	}
 
 	if !hasCommandPrefix(raw) {
-		m.addChatMessage(chatMessageInfo, "Commands start with '/'. Try /help.")
+		m.setOutput("", "Commands start with '/'. Try /help.")
 		m.commandInput.SetValue("")
 		m.commandInput.CursorEnd()
 		m.recomputeMatches()
@@ -401,7 +383,7 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		} else {
-			m.addChatMessage(chatMessageError, "Unknown command.\nTry /help.")
+			m.setOutput("", "Unknown command.\nTry /help.")
 			m.commandInput.SetValue("")
 			m.commandInput.CursorEnd()
 			m.recomputeMatches()
@@ -415,27 +397,7 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 
 	m.appendHistory(raw)
 	result := cmd.Run(&m, args)
-
-	if result.Clear {
-		m.clearChatMessages()
-	} else {
-		m.addChatMessage(chatMessageCommand, raw)
-	}
-
-	if strings.TrimSpace(result.Output) != "" {
-		msgType := chatMessageOutput
-		if cmd.Name == "help" {
-			msgType = chatMessageInfo
-		}
-		messageID := m.addChatMessage(msgType, result.Output)
-		if m.gitPullRunning {
-			m.gitPullMessageID = messageID
-		} else {
-			m.gitPullMessageID = -1
-		}
-	} else if !m.gitPullRunning {
-		m.gitPullMessageID = -1
-	}
+	m.setOutput(raw, result.Output)
 
 	if !result.KeepInput {
 		m.commandInput.Placeholder = defaultInputPlaceholder
@@ -600,13 +562,13 @@ func (m *Model) recomputeSkillMatches() {
 
 func (m *Model) applySkillPickerSelections() {
 	if len(m.available) == 0 {
-		m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
+		m.setOutput("", warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
 		m.exitSkillPicker(true)
 		return
 	}
 
 	if len(m.skillPickerSelections) == 0 {
-		m.addChatMessage(chatMessageInfo, infoStyle.Render("No selection changes."))
+		m.setOutput("", infoStyle.Render("No selection changes."))
 		m.exitSkillPicker(true)
 		return
 	}
@@ -646,16 +608,16 @@ func (m *Model) applySkillPickerSelections() {
 	if strings.TrimSpace(output) == "" {
 		output = infoStyle.Render("No selection changes.")
 	}
-	m.addChatMessage(chatMessageOutput, output)
+	m.setOutput("", output)
 	m.exitSkillPicker(true)
 }
 
 func (m *Model) toggleSkillPickerSelection() {
 	if len(m.skillMatches) == 0 {
 		if len(m.available) == 0 {
-			m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
+			m.setOutput("", warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
 		} else {
-			m.addChatMessage(chatMessageInfo, warnStyle.Render("No matching skills found."))
+			m.setOutput("", warnStyle.Render("No matching skills found."))
 		}
 		return
 	}
@@ -796,50 +758,21 @@ func (m *Model) historyNext() {
 	m.recomputeMatches()
 }
 
-func (m *Model) addChatMessage(messageType chatMessageType, content string) int {
-	content = strings.TrimRight(content, "\n")
-	if strings.TrimSpace(content) == "" {
-		return -1
-	}
-
-	id := m.nextMessageID
-	m.nextMessageID++
-	m.chatMessages = append(m.chatMessages, chatMessage{
-		ID:        id,
-		Type:      messageType,
-		Content:   content,
-		Timestamp: time.Now(),
-	})
-	m.refreshChatViewport(true)
-	return id
-}
-
-func (m *Model) updateChatMessage(id int, content string) bool {
-	content = strings.TrimRight(content, "\n")
-	for i := range m.chatMessages {
-		if m.chatMessages[i].ID == id {
-			m.chatMessages[i].Content = content
-			m.chatMessages[i].Timestamp = time.Now()
-			m.refreshChatViewport(true)
-			return true
-		}
-	}
-	return false
-}
-
-func (m *Model) clearChatMessages() {
-	m.chatMessages = nil
-	m.nextMessageID = 0
-	m.gitPullMessageID = -1
-	m.gitPullOutput = new(strings.Builder)
+func (m *Model) setOutput(label, content string) {
+	m.outputLabel = strings.TrimRight(label, "\n")
+	m.outputContent = strings.TrimRight(content, "\n")
 	m.refreshChatViewport(true)
 }
 
-func (m *Model) upsertGitPullMessage(content string) {
-	if m.gitPullMessageID >= 0 && m.updateChatMessage(m.gitPullMessageID, content) {
-		return
-	}
-	m.gitPullMessageID = m.addChatMessage(chatMessageOutput, content)
+func (m *Model) clearOutput() {
+	m.outputLabel = ""
+	m.outputContent = ""
+	m.refreshChatViewport(true)
+}
+
+func (m *Model) updateOutputContent(content string) {
+	m.outputContent = strings.TrimRight(content, "\n")
+	m.refreshChatViewport(true)
 }
 
 func (m *Model) applyLayout(stickBottom bool) {

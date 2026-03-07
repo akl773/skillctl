@@ -99,8 +99,7 @@ func TestUpdateAutoGitPullStartsBackgroundPull(t *testing.T) {
 				{ID: "repo", URL: "https://github.com/example/repo.git"},
 			},
 		},
-		gitPullOutput:    new(strings.Builder),
-		gitPullMessageID: -1,
+		gitPullOutput: new(strings.Builder),
 	}
 
 	updatedModel, cmd := m.Update(autoGitPullMsg{})
@@ -110,14 +109,12 @@ func TestUpdateAutoGitPullStartsBackgroundPull(t *testing.T) {
 	assert.True(t, updated.gitPullSilent)
 	assert.NotNil(t, cmd)
 	assert.Empty(t, updated.gitPullOutput.String())
-	assert.Empty(t, updated.chatMessages)
-	assert.Equal(t, -1, updated.gitPullMessageID)
+	assert.Empty(t, updated.outputContent)
 }
 
 func TestUpdateAutoGitPullNoopWithoutRepos(t *testing.T) {
 	m := Model{
-		gitPullOutput:    new(strings.Builder),
-		gitPullMessageID: -1,
+		gitPullOutput: new(strings.Builder),
 	}
 
 	updatedModel, cmd := m.Update(autoGitPullMsg{})
@@ -125,8 +122,7 @@ func TestUpdateAutoGitPullNoopWithoutRepos(t *testing.T) {
 
 	assert.False(t, updated.gitPullRunning)
 	assert.Nil(t, cmd)
-	assert.Empty(t, updated.chatMessages)
-	assert.Equal(t, -1, updated.gitPullMessageID)
+	assert.Empty(t, updated.outputContent)
 }
 
 func TestToggleSkillPickerSelectionTracksPendingState(t *testing.T) {
@@ -172,8 +168,8 @@ func TestApplySkillPickerSelectionsAppliesAddAndRemove(t *testing.T) {
 
 	assert.False(t, m.skillPickerOpen)
 	assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
-	require.NotEmpty(t, m.chatMessages)
-	output := m.chatMessages[len(m.chatMessages)-1].Content
+	require.NotEmpty(t, m.outputContent)
+	output := m.outputContent
 	assert.Contains(t, output, "Added:")
 	assert.Contains(t, output, "repo/beta")
 	assert.Contains(t, output, "Removed from selection:")
@@ -181,4 +177,32 @@ func TestApplySkillPickerSelectionsAppliesAddAndRemove(t *testing.T) {
 
 	saved := config.LoadConfig(paths)
 	assert.Equal(t, []string{"repo/beta"}, saved.SelectedSkills)
+}
+
+func TestEscapeClearsInputBeforeViewport(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.setOutput("/list", "some output")
+	m.commandInput.SetValue("/hel")
+
+	updatedModel, _ := m.handleCommandKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := updatedModel.(Model)
+
+	assert.Equal(t, "", updated.commandInput.Value())
+	assert.Equal(t, "/list", updated.outputLabel)
+	assert.Equal(t, "some output", updated.outputContent)
+}
+
+func TestEscapeClearsViewportWhenInputEmpty(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.setOutput("/list", "some output")
+	m.commandInput.SetValue("")
+
+	updatedModel, _ := m.handleCommandKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := updatedModel.(Model)
+
+	assert.Equal(t, "", updated.commandInput.Value())
+	assert.Equal(t, "", updated.outputLabel)
+	assert.Equal(t, "", updated.outputContent)
 }

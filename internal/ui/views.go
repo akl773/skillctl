@@ -419,16 +419,19 @@ func (m Model) renderHelpBar(width int) string {
 }
 
 func (m Model) renderChatViewportContent(width int) string {
-	if len(m.chatMessages) == 0 {
+	if strings.TrimSpace(m.outputLabel) == "" && strings.TrimSpace(m.outputContent) == "" {
 		return m.renderWelcomeState(width)
 	}
 
-	parts := make([]string, 0, len(m.chatMessages)*2)
-	for i, msg := range m.chatMessages {
-		parts = append(parts, m.renderChatMessage(msg, width))
-		if i < len(m.chatMessages)-1 {
+	parts := make([]string, 0, 3)
+	if strings.TrimSpace(m.outputLabel) != "" {
+		parts = append(parts, m.renderOutputLabel(m.outputLabel, width))
+	}
+	if strings.TrimSpace(m.outputContent) != "" {
+		if len(parts) > 0 {
 			parts = append(parts, "")
 		}
+		parts = append(parts, m.renderOutputContent(m.outputContent, width))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -481,54 +484,50 @@ func (m Model) renderWelcomeState(width int) string {
 	)
 }
 
-func (m Model) renderChatMessage(msg chatMessage, width int) string {
+func (m Model) renderOutputLabel(label string, width int) string {
 	if width < 10 {
 		width = 10
 	}
 
-	borderColor := primary
-	bodyStyle := outputBodyStyle
-	label := "💬"
-
-	switch msg.Type {
-	case chatMessageCommand:
-		borderColor = secondary
-		bodyStyle = commandBodyStyle
-		label = "⌘"
-	case chatMessageInfo:
-		borderColor = muted
-		bodyStyle = mutedStyle
-		label = "ℹ️"
-	case chatMessageError:
-		borderColor = danger
-		bodyStyle = errorStyle
-		label = "⚠️"
-	}
-
-	content := strings.TrimRight(msg.Content, "\n")
+	content := strings.TrimRight(label, "\n")
 	if m.tinyLayout() {
 		return lipgloss.NewStyle().
 			Width(width).
 			BorderLeft(true).
 			BorderStyle(lipgloss.ThickBorder()).
-			BorderForeground(borderColor).
+			BorderForeground(secondary).
 			PaddingLeft(1).
-			Render(bodyStyle.Render(content))
+			Render(commandBodyStyle.Render(content))
 	}
 
 	rendered := lipgloss.JoinVertical(
 		lipgloss.Left,
-		messageLabelStyle.Render(label),
-		bodyStyle.Render(content),
+		messageLabelStyle.Render("⌘"),
+		commandBodyStyle.Render(content),
 	)
 
 	return lipgloss.NewStyle().
 		Width(width).
 		BorderLeft(true).
 		BorderStyle(lipgloss.ThickBorder()).
-		BorderForeground(borderColor).
+		BorderForeground(secondary).
 		PaddingLeft(1).
 		Render(rendered)
+}
+
+func (m Model) renderOutputContent(content string, width int) string {
+	if width < 10 {
+		width = 10
+	}
+
+	content = strings.TrimRight(content, "\n")
+	return lipgloss.NewStyle().
+		Width(width).
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(primary).
+		PaddingLeft(1).
+		Render(outputBodyStyle.Render(content))
 }
 
 func renderGoodbye(width int) string {
