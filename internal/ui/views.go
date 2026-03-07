@@ -80,6 +80,18 @@ var (
 	paletteItemStyle = lipgloss.NewStyle().
 				Foreground(text)
 
+	checkboxSelectedStyle = lipgloss.NewStyle().
+				Foreground(success)
+
+	checkboxEmptyStyle = lipgloss.NewStyle().
+				Foreground(muted)
+
+	checkboxAddStyle = lipgloss.NewStyle().
+				Foreground(primary)
+
+	checkboxRemoveStyle = lipgloss.NewStyle().
+				Foreground(accent)
+
 	activeItemStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#0F172A")).
@@ -307,29 +319,43 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 		for i := 0; i < displayCount; i++ {
 			match := visible[i]
 			absoluteIndex := m.skillOffset + i
-			marker := " "
-			if match.Selected {
-				marker = "*"
+			currentSelected := m.skillPickerSelected(match.Skill.ID, match.Selected)
+			pendingAdd := !match.Selected && currentSelected
+			pendingRemove := match.Selected && !currentSelected
+
+			indicatorPlain := "[ ]"
+			indicatorStyled := checkboxEmptyStyle.Render(indicatorPlain)
+			switch {
+			case pendingAdd:
+				indicatorPlain = "[+]"
+				indicatorStyled = checkboxAddStyle.Render(indicatorPlain)
+			case pendingRemove:
+				indicatorPlain = "[-]"
+				indicatorStyled = checkboxRemoveStyle.Render(indicatorPlain)
+			case currentSelected:
+				indicatorPlain = "[✓]"
+				indicatorStyled = checkboxSelectedStyle.Render(indicatorPlain)
 			}
 
-			prefix := fmt.Sprintf(" %s %4d. ", marker, match.CatalogIndex)
+			prefixPlain := fmt.Sprintf(" %s %4d. ", indicatorPlain, match.CatalogIndex)
+			prefixStyled := fmt.Sprintf(" %s %4d. ", indicatorStyled, match.CatalogIndex)
 			name := skillDisplayName(match.Skill)
 			namespace := skillNamespace(match.Skill)
 
-			nameWidth := lineWidth - len(prefix)
+			nameWidth := lineWidth - len(prefixPlain)
 			if namespace != "" {
 				namespaceWidth := max(10, min(34, lineWidth/3))
 				namespace = truncateASCII(namespace, namespaceWidth)
-				nameWidth = lineWidth - len(prefix) - len(namespace) - 2
+				nameWidth = lineWidth - len(prefixPlain) - len(namespace) - 2
 				if nameWidth < 8 {
 					nameWidth = 8
-					namespace = truncateASCII(namespace, max(0, lineWidth-len(prefix)-nameWidth-2))
+					namespace = truncateASCII(namespace, max(0, lineWidth-len(prefixPlain)-nameWidth-2))
 				}
 			}
 
 			name = truncateASCII(name, nameWidth)
-			plain := prefix + name
-			styled := plain
+			plain := prefixPlain + name
+			styled := prefixStyled + name
 			if namespace != "" {
 				plain += "  " + namespace
 				styled += "  " + mutedStyle.Render(namespace)
@@ -361,7 +387,7 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 		}
 	}
 
-	lines = append(lines, usageStyle.Render(truncateASCII(" enter add  esc cancel", lineWidth)))
+	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  enter confirm  esc cancel", lineWidth)))
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if m.tinyLayout() {
 		return lipgloss.NewStyle().Width(width).Render(content)
@@ -373,7 +399,7 @@ func (m Model) renderHelpBar(width int) string {
 	if m.tinyLayout() {
 		help := "/ commands  enter run  ctrl+c quit"
 		if m.skillPickerOpen {
-			help = "type search  up/down pick  enter add"
+			help = "up/down move  space toggle  enter confirm"
 		} else if m.paletteOpen() {
 			help = "up/down select  tab fill  enter run"
 		}
@@ -382,7 +408,7 @@ func (m Model) renderHelpBar(width int) string {
 
 	help := "type / for commands  up/down history  pgup/pgdn scroll  ctrl+c quit"
 	if m.skillPickerOpen {
-		help = "type to search  up/down select  enter add  esc cancel  ctrl+c quit"
+		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
 	} else if m.paletteOpen() {
 		help = "up/down select  tab autocomplete  enter run  esc reset  ctrl+c quit"
 	}

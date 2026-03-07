@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -69,10 +70,11 @@ type Model struct {
 	matches       []commandMatch
 	paletteCursor int
 
-	skillPickerOpen bool
-	skillMatches    []skillMatch
-	skillCursor     int
-	skillOffset     int
+	skillPickerOpen       bool
+	skillMatches          []skillMatch
+	skillCursor           int
+	skillOffset           int
+	skillPickerSelections map[string]bool
 
 	history      []string
 	historyIndex int
@@ -283,9 +285,13 @@ func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "enter":
-		m.addSkillFromPicker()
+		m.applySkillPickerSelections()
 		m.historyIndex = len(m.history)
 		m.applyLayout(true)
+		return m, nil
+	case " ", "space":
+		m.toggleSkillPickerSelection()
+		m.applyLayout(false)
 		return m, nil
 	case "up":
 		m.moveSkillPicker(-1)
@@ -558,6 +564,7 @@ func (m *Model) enterSkillPicker() {
 	m.skillPickerOpen = true
 	m.skillCursor = 0
 	m.skillOffset = 0
+	m.skillPickerSelections = make(map[string]bool)
 	m.commandInput.Placeholder = skillPickerPlaceholder
 	m.commandInput.SetValue("")
 	m.commandInput.CursorEnd()
@@ -570,6 +577,7 @@ func (m *Model) exitSkillPicker(clearInput bool) {
 	m.skillMatches = nil
 	m.skillCursor = 0
 	m.skillOffset = 0
+	m.skillPickerSelections = nil
 	m.commandInput.Placeholder = defaultInputPlaceholder
 	if clearInput {
 		m.commandInput.SetValue("")
@@ -590,14 +598,65 @@ func (m *Model) recomputeSkillMatches() {
 	m.clampSkillWindow()
 }
 
-func (m *Model) addSkillFromPicker() {
+func (m *Model) applySkillPickerSelections() {
+	if len(m.available) == 0 {
+		m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
+		m.exitSkillPicker(true)
+		return
+	}
+
+	if len(m.skillPickerSelections) == 0 {
+		m.addChatMessage(chatMessageInfo, infoStyle.Render("No selection changes."))
+		m.exitSkillPicker(true)
+		return
+	}
+
+	selectedByLower := make(map[string]string, len(m.cfg.SelectedSkills))
+	for _, skill := range m.cfg.SelectedSkills {
+		selectedByLower[strings.ToLower(skill)] = skill
+	}
+
+	availableByLower := make(map[string]string, len(m.availableIDs))
+	for _, skillID := range m.availableIDs {
+		availableByLower[strings.ToLower(skillID)] = skillID
+	}
+
+	addRequested := make([]string, 0, len(m.skillPickerSelections))
+	removeRequested := make([]string, 0, len(m.skillPickerSelections))
+	for lowerID, shouldSelect := range m.skillPickerSelections {
+		if shouldSelect {
+			if _, exists := selectedByLower[lowerID]; exists {
+				continue
+			}
+			if resolved, ok := availableByLower[lowerID]; ok {
+				addRequested = append(addRequested, resolved)
+			}
+			continue
+		}
+
+		if resolved, exists := selectedByLower[lowerID]; exists {
+			removeRequested = append(removeRequested, resolved)
+		}
+	}
+
+	sort.Strings(addRequested)
+	sort.Strings(removeRequested)
+
+	output := m.applySkillSelectionChanges(addRequested, removeRequested)
+	if strings.TrimSpace(output) == "" {
+		output = infoStyle.Render("No selection changes.")
+	}
+	m.addChatMessage(chatMessageOutput, output)
+	m.exitSkillPicker(true)
+}
+
+func (m *Model) toggleSkillPickerSelection() {
 	if len(m.skillMatches) == 0 {
 		if len(m.available) == 0 {
 			m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
 		} else {
 			m.addChatMessage(chatMessageInfo, warnStyle.Render("No matching skills found."))
 		}
-		m.exitSkillPicker(true)
 		return
 	}
 
@@ -606,14 +665,26 @@ func (m *Model) addSkillFromPicker() {
 	}
 
 	chosen := m.skillMatches[m.skillCursor]
-	cmdText := "/add " + chosen.Skill.ID
-	m.appendHistory(cmdText)
-	m.addChatMessage(chatMessageCommand, cmdText)
-	if output := m.actionAddSkill(chosen.Skill.ID); strings.TrimSpace(output) != "" {
-		m.addChatMessage(chatMessageOutput, output)
+	lowerID := strings.ToLower(chosen.Skill.ID)
+	current := m.skillPickerSelected(chosen.Skill.ID, chosen.Selected)
+	next := !current
+	if next == chosen.Selected {
+		delete(m.skillPickerSelections, lowerID)
+		return
 	}
 
-	m.exitSkillPicker(true)
+	m.skillPickerSelections[lowerID] = next
+}
+
+func (m Model) skillPickerSelected(skillID string, fallback bool) bool {
+	if len(m.skillPickerSelections) == 0 {
+		return fallback
+	}
+	selected, ok := m.skillPickerSelections[strings.ToLower(skillID)]
+	if !ok {
+		return fallback
+	}
+	return selected
 }
 
 func (m *Model) clampSkillWindow() {
