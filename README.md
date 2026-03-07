@@ -81,7 +81,17 @@ make build    # Build binary (injects version from git tag)
 make run      # Build and run
 make clean    # Remove binary
 make install  # Install to $GOPATH/bin
+make test     # Run unit tests
+make cover    # Run tests with coverage summary
 ```
+
+## Architecture and Testing
+
+- Architecture guide: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Unit tests follow table-driven Go style with `testify/assert` and
+  `testify/require`, inspired by mature open-source Go CLI projects.
+- Priority coverage targets are `internal/config`, `internal/core`, and command
+  parsing helpers in `internal/ui`.
 
 ## Releasing
 
