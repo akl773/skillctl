@@ -11,7 +11,7 @@ GitHub repositories into multiple local agent target directories.
 Core responsibilities:
 
 1. Manage repository sources (`/repos`, `/repo add`, `/repo remove`)
-2. Clone/update repositories into a local workspace cache (`/pull`)
+2. Auto clone/update repositories into a local workspace cache on launch (manual `/pull` also supported)
 3. Discover skills generically by scanning for `SKILL.md`
 4. Persist user config in `<workspace>/.local/skillctl.json`
 5. Sync selected skills into configured target folders (`/sync`)

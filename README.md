@@ -49,6 +49,7 @@ These repositories are included out of the box:
 - `https://github.com/callstackincubator/agent-skills.git`
 - `https://github.com/tech-leads-club/agent-skills.git`
 - `https://github.com/ComposioHQ/awesome-claude-skills.git`
+- `https://github.com/sickn33/antigravity-awesome-skills.git`
 
 You can add and remove repositories at runtime via `/repo add` and `/repo remove`.
 
@@ -56,10 +57,11 @@ You can add and remove repositories at runtime via `/repo add` and `/repo remove
 
 1. `skillctl` stores its workspace at `~/.skillctl` by default (override via `--workspace` or `$SKILLCTL_WORKSPACE`).
 2. Repository definitions and selections are stored in `~/.skillctl/.local/skillctl.json`.
-3. `/pull` clones or updates each configured repository into `~/.skillctl/.local/repos/<repo-id>`.
-4. `skillctl` recursively discovers skills by finding `SKILL.md` files in those local clones.
-5. Skills are selected using namespaced IDs: `<repo-id>/<skill-name>`.
-6. `/sync` rsyncs selected skills to each configured target.
+3. On launch, `skillctl` automatically clones or updates each configured repository in the background into `~/.skillctl/.local/repos/<repo-id>`.
+4. `/pull` is still available if you want to force a manual refresh immediately.
+5. `skillctl` recursively discovers skills by finding `SKILL.md` files in those local clones.
+6. Skills are selected using namespaced IDs: `<repo-id>/<skill-name>`.
+7. `/sync` rsyncs selected skills to each configured target.
 
 To prevent cross-repo collisions, target directory names use a namespaced layout:
 
@@ -82,7 +84,7 @@ Targets can be added or removed from within the TUI at any time.
 ## Common Workflow
 
 1. `/repos` to inspect configured repositories
-2. `/pull` to clone/update repositories
+2. `/pull` (optional) to force an immediate repository refresh
 3. `/search <query>` to find skills
 4. `/add <skill-id>` (or `/add <catalog-number>`) to select skills
 5. `/sync` to deploy selected skills to all targets
@@ -94,7 +96,8 @@ Targets can be added or removed from within the TUI at any time.
 - **Namespaced skill IDs** — avoid collisions across repositories
 - **Multi-target sync** — rsync selected skills to all configured agent folders at once
 - **Repository management** — add/remove/list repositories on the fly
-- **Git integration** — clone/pull all repositories from inside the app
+- **Auto background updates** — repositories sync automatically on app launch
+- **Git integration** — run `/pull` anytime for an immediate refresh
 
 ## Development
 
