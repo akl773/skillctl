@@ -20,6 +20,14 @@ type gitPullDoneMsg struct {
 	outcome core.GitPullOutcome
 }
 
+type autoGitPullMsg struct{}
+
+func startAutoGitPullCmd() tea.Cmd {
+	return func() tea.Msg {
+		return autoGitPullMsg{}
+	}
+}
+
 func startGitPullStreamCmd(paths config.AppPaths, repositories []config.Repository) tea.Cmd {
 	return func() tea.Msg {
 		events := make(chan tea.Msg, 128)

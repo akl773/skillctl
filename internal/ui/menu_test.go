@@ -1,0 +1,130 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"akhilsingh.in/skillctl/internal/config"
+)
+
+func TestSkillPickerWindowScrollsWithCursor(t *testing.T) {
+	matches := make([]skillMatch, 0, 8)
+	for i := 0; i < 8; i++ {
+		matches = append(matches, skillMatch{
+			Skill: config.AvailableSkill{
+				ID: fmt.Sprintf("repo/skill-%d", i+1),
+			},
+			CatalogIndex: i + 1,
+		})
+	}
+
+	m := Model{
+		skillMatches: matches,
+		height:       70, // maxDropdownItems = 6
+	}
+
+	for i := 0; i < 6; i++ {
+		m.moveSkillPicker(1)
+	}
+
+	assert.Equal(t, 6, m.skillCursor)
+	assert.Equal(t, 1, m.skillOffset)
+	visible := m.visibleSkillMatches()
+	assert.Len(t, visible, 6)
+	assert.Equal(t, "repo/skill-2", visible[0].Skill.ID)
+	assert.Equal(t, "repo/skill-7", visible[5].Skill.ID)
+
+	m.moveSkillPicker(1)
+	assert.Equal(t, 7, m.skillCursor)
+	assert.Equal(t, 2, m.skillOffset)
+
+	m.moveSkillPicker(1)
+	assert.Equal(t, 0, m.skillCursor)
+	assert.Equal(t, 0, m.skillOffset)
+}
+
+func TestInitSchedulesAutoGitPullWhenReposConfigured(t *testing.T) {
+	m := Model{
+		cfg: config.Config{
+			Repositories: []config.Repository{
+				{ID: "repo", URL: "https://github.com/example/repo.git"},
+			},
+		},
+	}
+
+	cmd := m.Init()
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok)
+
+	foundAutoPull := false
+	for _, sub := range batch {
+		if sub == nil {
+			continue
+		}
+		if _, ok := sub().(autoGitPullMsg); ok {
+			foundAutoPull = true
+			break
+		}
+	}
+
+	assert.True(t, foundAutoPull)
+}
+
+func TestInitSkipsAutoGitPullWithoutRepos(t *testing.T) {
+	m := Model{}
+
+	cmd := m.Init()
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	_, isBatch := msg.(tea.BatchMsg)
+	_, isAutoPull := msg.(autoGitPullMsg)
+
+	assert.False(t, isBatch)
+	assert.False(t, isAutoPull)
+}
+
+func TestUpdateAutoGitPullStartsBackgroundPull(t *testing.T) {
+	m := Model{
+		cfg: config.Config{
+			Repositories: []config.Repository{
+				{ID: "repo", URL: "https://github.com/example/repo.git"},
+			},
+		},
+		gitPullOutput:    new(strings.Builder),
+		gitPullMessageID: -1,
+	}
+
+	updatedModel, cmd := m.Update(autoGitPullMsg{})
+	updated := updatedModel.(Model)
+
+	assert.True(t, updated.gitPullRunning)
+	assert.True(t, updated.gitPullSilent)
+	assert.NotNil(t, cmd)
+	assert.Empty(t, updated.gitPullOutput.String())
+	assert.Empty(t, updated.chatMessages)
+	assert.Equal(t, -1, updated.gitPullMessageID)
+}
+
+func TestUpdateAutoGitPullNoopWithoutRepos(t *testing.T) {
+	m := Model{
+		gitPullOutput:    new(strings.Builder),
+		gitPullMessageID: -1,
+	}
+
+	updatedModel, cmd := m.Update(autoGitPullMsg{})
+	updated := updatedModel.(Model)
+
+	assert.False(t, updated.gitPullRunning)
+	assert.Nil(t, cmd)
+	assert.Empty(t, updated.chatMessages)
+	assert.Equal(t, -1, updated.gitPullMessageID)
+}

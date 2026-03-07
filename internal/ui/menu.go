@@ -59,6 +59,7 @@ type Model struct {
 	nextMessageID int
 
 	gitPullRunning   bool
+	gitPullSilent    bool
 	gitPullEvents    <-chan tea.Msg
 	gitPullOutput    *strings.Builder
 	gitPullMessageID int
@@ -71,6 +72,7 @@ type Model struct {
 	skillPickerOpen bool
 	skillMatches    []skillMatch
 	skillCursor     int
+	skillOffset     int
 
 	history      []string
 	historyIndex int
@@ -112,7 +114,14 @@ func NewModel(paths config.AppPaths) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.WindowSize()
+	if len(m.cfg.Repositories) == 0 {
+		return tea.WindowSize()
+	}
+
+	return tea.Batch(
+		tea.WindowSize(),
+		startAutoGitPullCmd(),
+	)
 }
 
 // Update handles all messages.
@@ -130,6 +139,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
+	case autoGitPullMsg:
+		if len(m.cfg.Repositories) == 0 {
+			return m, nil
+		}
+
+		if m.gitPullRunning {
+			return m, nil
+		}
+
+		m.gitPullRunning = true
+		m.gitPullSilent = true
+		m.gitPullEvents = nil
+		m.gitPullOutput.Reset()
+		m.gitPullMessageID = -1
+		return m, startGitPullStreamCmd(m.paths, m.cfg.Repositories)
+
 	case gitPullStreamStartedMsg:
 		m.gitPullEvents = msg.events
 		if m.gitPullEvents == nil {
@@ -139,6 +164,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForGitPullEventCmd(m.gitPullEvents)
 
 	case gitPullChunkMsg:
+		if m.gitPullSilent {
+			if m.gitPullEvents != nil {
+				return m, waitForGitPullEventCmd(m.gitPullEvents)
+			}
+			return m, nil
+		}
+
 		if msg.isStderr {
 			m.gitPullOutput.WriteString(mutedStyle.Render(msg.chunk))
 		} else {
@@ -151,15 +183,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case gitPullDoneMsg:
+		silent := m.gitPullSilent
 		if msg.outcome.Success() {
-			m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repositories are up to date."))
+			if !silent {
+				m.gitPullOutput.WriteString("\n" + successStyle.Render("OK: repositories are up to date."))
+				m.upsertGitPullMessage(m.gitPullOutput.String())
+			}
 			m.refresh()
+		} else if silent {
+			m.addChatMessage(chatMessageError, errorStyle.Render("Background repository sync failed. Run /pull to inspect details and retry."))
 		} else {
 			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: one or more repository updates failed. Resolve git issues before syncing."))
+			m.upsertGitPullMessage(m.gitPullOutput.String())
 		}
-		m.upsertGitPullMessage(m.gitPullOutput.String())
 		m.gitPullRunning = false
+		m.gitPullSilent = false
 		m.gitPullEvents = nil
+		if !m.gitPullRunning {
+			m.gitPullMessageID = -1
+		}
 		return m, nil
 	}
 
@@ -269,7 +311,12 @@ func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	prev := m.commandInput.Value()
 	m.commandInput, cmd = m.commandInput.Update(msg)
+	if m.commandInput.Value() != prev {
+		m.skillCursor = 0
+		m.skillOffset = 0
+	}
 	m.recomputeSkillMatches()
 	m.applyLayout(false)
 	return m, cmd
@@ -450,10 +497,24 @@ func (m Model) visibleSkillMatches() []skillMatch {
 	if limit < 1 {
 		limit = maxPaletteItems
 	}
-	if len(m.skillMatches) <= limit {
-		return m.skillMatches
+	if len(m.skillMatches) == 0 {
+		return nil
 	}
-	return m.skillMatches[:limit]
+
+	start := m.skillOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.skillMatches) {
+		start = len(m.skillMatches)
+	}
+
+	end := start + limit
+	if end > len(m.skillMatches) {
+		end = len(m.skillMatches)
+	}
+
+	return m.skillMatches[start:end]
 }
 
 func (m Model) paletteOpen() bool {
@@ -478,23 +539,25 @@ func (m *Model) movePalette(delta int) {
 }
 
 func (m *Model) moveSkillPicker(delta int) {
-	visible := m.visibleSkillMatches()
-	if len(visible) == 0 {
+	if len(m.skillMatches) == 0 {
 		return
 	}
 
 	m.skillCursor += delta
 	if m.skillCursor < 0 {
-		m.skillCursor = len(visible) - 1
+		m.skillCursor = len(m.skillMatches) - 1
 	}
-	if m.skillCursor >= len(visible) {
+	if m.skillCursor >= len(m.skillMatches) {
 		m.skillCursor = 0
 	}
+
+	m.clampSkillWindow()
 }
 
 func (m *Model) enterSkillPicker() {
 	m.skillPickerOpen = true
 	m.skillCursor = 0
+	m.skillOffset = 0
 	m.commandInput.Placeholder = skillPickerPlaceholder
 	m.commandInput.SetValue("")
 	m.commandInput.CursorEnd()
@@ -506,6 +569,7 @@ func (m *Model) exitSkillPicker(clearInput bool) {
 	m.skillPickerOpen = false
 	m.skillMatches = nil
 	m.skillCursor = 0
+	m.skillOffset = 0
 	m.commandInput.Placeholder = defaultInputPlaceholder
 	if clearInput {
 		m.commandInput.SetValue("")
@@ -517,24 +581,19 @@ func (m *Model) exitSkillPicker(clearInput bool) {
 
 func (m *Model) recomputeSkillMatches() {
 	m.skillMatches = m.matchAvailableSkills(m.commandInput.Value())
-	visible := m.visibleSkillMatches()
-	if len(visible) == 0 {
+	if len(m.skillMatches) == 0 {
 		m.skillCursor = 0
+		m.skillOffset = 0
 		return
 	}
-	if m.skillCursor < 0 {
-		m.skillCursor = 0
-	}
-	if m.skillCursor >= len(visible) {
-		m.skillCursor = len(visible) - 1
-	}
+
+	m.clampSkillWindow()
 }
 
 func (m *Model) addSkillFromPicker() {
-	visible := m.visibleSkillMatches()
-	if len(visible) == 0 {
+	if len(m.skillMatches) == 0 {
 		if len(m.available) == 0 {
-			m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available. Run /pull first."))
+			m.addChatMessage(chatMessageInfo, warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
 		} else {
 			m.addChatMessage(chatMessageInfo, warnStyle.Render("No matching skills found."))
 		}
@@ -542,11 +601,11 @@ func (m *Model) addSkillFromPicker() {
 		return
 	}
 
-	if m.skillCursor < 0 || m.skillCursor >= len(visible) {
+	if m.skillCursor < 0 || m.skillCursor >= len(m.skillMatches) {
 		m.skillCursor = 0
 	}
 
-	chosen := visible[m.skillCursor]
+	chosen := m.skillMatches[m.skillCursor]
 	cmdText := "/add " + chosen.Skill.ID
 	m.appendHistory(cmdText)
 	m.addChatMessage(chatMessageCommand, cmdText)
@@ -555,6 +614,56 @@ func (m *Model) addSkillFromPicker() {
 	}
 
 	m.exitSkillPicker(true)
+}
+
+func (m *Model) clampSkillWindow() {
+	count := len(m.skillMatches)
+	if count == 0 {
+		m.skillCursor = 0
+		m.skillOffset = 0
+		return
+	}
+
+	if m.skillCursor < 0 {
+		m.skillCursor = 0
+	}
+	if m.skillCursor >= count {
+		m.skillCursor = count - 1
+	}
+
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if limit > count {
+		limit = count
+	}
+
+	maxOffset := count - limit
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	if m.skillOffset < 0 {
+		m.skillOffset = 0
+	}
+	if m.skillOffset > maxOffset {
+		m.skillOffset = maxOffset
+	}
+
+	if m.skillCursor < m.skillOffset {
+		m.skillOffset = m.skillCursor
+	}
+	if m.skillCursor >= m.skillOffset+limit {
+		m.skillOffset = m.skillCursor - limit + 1
+	}
+
+	if m.skillOffset < 0 {
+		m.skillOffset = 0
+	}
+	if m.skillOffset > maxOffset {
+		m.skillOffset = maxOffset
+	}
 }
 
 func (m *Model) autocompleteSelected() {

@@ -300,12 +300,13 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
 
 	if len(m.available) == 0 {
-		lines = append(lines, warnStyle.Render(truncateASCII(" No skills available. Run /pull first.", lineWidth)))
+		lines = append(lines, warnStyle.Render(truncateASCII(" No skills available yet. Auto-sync runs on launch; use /pull to retry.", lineWidth)))
 	} else if displayCount == 0 {
 		lines = append(lines, warnStyle.Render(truncateASCII(" No matching skills.", lineWidth)))
 	} else {
 		for i := 0; i < displayCount; i++ {
 			match := visible[i]
+			absoluteIndex := m.skillOffset + i
 			marker := " "
 			if match.Selected {
 				marker = "*"
@@ -334,16 +335,29 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 				styled += "  " + mutedStyle.Render(namespace)
 			}
 			plain = truncateASCII(plain, lineWidth)
-			if i == m.skillCursor {
+			if absoluteIndex == m.skillCursor {
 				lines = append(lines, activeItemStyle.Render(plain))
 			} else {
 				lines = append(lines, paletteItemStyle.Render(styled))
 			}
 		}
 
-		if len(m.skillMatches) > displayCount {
-			more := fmt.Sprintf(" ... and %d more", len(m.skillMatches)-displayCount)
-			lines = append(lines, mutedStyle.Render(truncateASCII(more, lineWidth)))
+		above := m.skillOffset
+		below := len(m.skillMatches) - (m.skillOffset + displayCount)
+		if below < 0 {
+			below = 0
+		}
+		if above > 0 || below > 0 {
+			status := ""
+			switch {
+			case above > 0 && below > 0:
+				status = fmt.Sprintf(" ... %d above, %d more", above, below)
+			case above > 0:
+				status = fmt.Sprintf(" ... %d above", above)
+			default:
+				status = fmt.Sprintf(" ... and %d more", below)
+			}
+			lines = append(lines, mutedStyle.Render(truncateASCII(status, lineWidth)))
 		}
 	}
 

@@ -22,6 +22,7 @@ func (m *Model) actionGitPull() commandResult {
 	}
 
 	m.gitPullRunning = true
+	m.gitPullSilent = false
 	m.gitPullOutput.Reset()
 	m.gitPullOutput.WriteString(infoStyle.Render("Updating configured repositories...") + "\n")
 
@@ -598,7 +599,7 @@ func (m *Model) actionListRepos() string {
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(mutedStyle.Render("Use /repo add <url>, /repo remove <index|id|url>, then /pull to fetch."))
+	sb.WriteString(mutedStyle.Render("Use /repo add <url> and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to refresh now."))
 	return sb.String()
 }
 
@@ -627,7 +628,7 @@ func (m *Model) actionAddRepo(raw string) string {
 		return errorStyle.Render("Failed to save config: " + err.Error())
 	}
 
-	return successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("Run /pull to clone and index its skills.")
+	return successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("It will sync automatically on next launch. Run /pull now to clone and index immediately.")
 }
 
 func (m *Model) actionRemoveRepo(raw string) string {
