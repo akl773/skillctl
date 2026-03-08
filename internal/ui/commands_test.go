@@ -148,8 +148,9 @@ func TestBuiltInCommands(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "skills", skillsCmd.Name)
 
-	_, ok = findCommandByAlias(commands, "add")
-	assert.False(t, ok)
+	addCmd, ok := findCommandByAlias(commands, "add")
+	require.True(t, ok)
+	assert.Equal(t, "add", addCmd.Name)
 
 	_, ok = findCommandByAlias(commands, "remove")
 	assert.False(t, ok)
@@ -158,9 +159,14 @@ func TestBuiltInCommands(t *testing.T) {
 func TestResolveBuiltInRepoCommands(t *testing.T) {
 	commands := builtInCommands()
 
-	cmd, args, ok := resolveCommand(commands, "/repo add https://github.com/foo/bar")
+	cmd, args, ok := resolveCommand(commands, "/add https://github.com/foo/bar")
 	require.True(t, ok)
-	assert.Equal(t, "repo add", cmd.Name)
+	assert.Equal(t, "add", cmd.Name)
+	assert.Equal(t, "https://github.com/foo/bar", args)
+
+	cmd, args, ok = resolveCommand(commands, "/repo add https://github.com/foo/bar")
+	require.True(t, ok)
+	assert.Equal(t, "add", cmd.Name)
 	assert.Equal(t, "https://github.com/foo/bar", args)
 
 	cmd, args, ok = resolveCommand(commands, "/repo remove vercel-labs-agent-skills")
@@ -196,6 +202,22 @@ func TestResolveBuiltInSkillsAliasRunsToggleAction(t *testing.T) {
 	assert.Contains(t, result.Output, "Removed from selection:")
 	assert.Contains(t, result.Output, "repo/alpha")
 	assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
+}
+
+func TestAddCommandWithoutArgsEntersRepoURLPrompt(t *testing.T) {
+	commands := builtInCommands()
+	cmd, args, ok := resolveCommand(commands, "/add")
+	require.True(t, ok)
+	assert.Equal(t, "add", cmd.Name)
+	assert.Equal(t, "", args)
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+
+	result := cmd.Run(&m, args)
+	assert.True(t, result.KeepInput)
+	assert.True(t, m.awaitingRepoURL)
+	assert.Equal(t, repoURLPromptPlaceholder, m.commandInput.Placeholder)
 }
 
 func testCommandDefs() []commandDef {

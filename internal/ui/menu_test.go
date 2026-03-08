@@ -206,3 +206,56 @@ func TestEscapeClearsViewportWhenInputEmpty(t *testing.T) {
 	assert.Equal(t, "", updated.outputLabel)
 	assert.Equal(t, "", updated.outputContent)
 }
+
+func TestRepoURLPromptSubmitAddsRepository(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	initialRepoCount := len(m.cfg.Repositories)
+
+	m.enterRepoURLPrompt()
+	m.commandInput.SetValue("https://github.com/foo/bar")
+
+	updatedModel, _ := m.handleRepoURLPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := updatedModel.(Model)
+
+	assert.False(t, updated.awaitingRepoURL)
+	assert.Equal(t, defaultInputPlaceholder, updated.commandInput.Placeholder)
+	assert.Equal(t, "", updated.commandInput.Value())
+	require.Len(t, updated.cfg.Repositories, initialRepoCount+1)
+	assert.Equal(t, "foo-bar", updated.cfg.Repositories[len(updated.cfg.Repositories)-1].ID)
+	assert.Contains(t, updated.outputContent, "Added repository")
+}
+
+func TestRepoURLPromptSubmitInvalidURLKeepsPromptOpen(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	initialRepoCount := len(m.cfg.Repositories)
+
+	m.enterRepoURLPrompt()
+	m.commandInput.SetValue("not-a-url")
+
+	updatedModel, _ := m.handleRepoURLPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := updatedModel.(Model)
+
+	assert.True(t, updated.awaitingRepoURL)
+	assert.Equal(t, repoURLPromptPlaceholder, updated.commandInput.Placeholder)
+	assert.Contains(t, updated.outputContent, "Invalid repository URL")
+	assert.Len(t, updated.cfg.Repositories, initialRepoCount)
+}
+
+func TestRepoURLPromptEscapeCancelsPrompt(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	initialRepoCount := len(m.cfg.Repositories)
+
+	m.enterRepoURLPrompt()
+	m.commandInput.SetValue("https://github.com/foo/bar")
+
+	updatedModel, _ := m.handleRepoURLPromptKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := updatedModel.(Model)
+
+	assert.False(t, updated.awaitingRepoURL)
+	assert.Equal(t, defaultInputPlaceholder, updated.commandInput.Placeholder)
+	assert.Equal(t, "", updated.commandInput.Value())
+	assert.Len(t, updated.cfg.Repositories, initialRepoCount)
+}
