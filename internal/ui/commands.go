@@ -77,6 +77,21 @@ func builtInCommands() []commandDef {
 			},
 		},
 		{
+			Name:        "add",
+			Aliases:     []string{"repo add"},
+			Description: "Add one source repository (repo-only)",
+			Usage:       "/add [github-url]",
+			Examples:    []string{"/add", "/add https://github.com/org/repo", "/add git@github.com:org/repo.git"},
+			Run: func(m *Model, args string) commandResult {
+				args = strings.TrimSpace(args)
+				if args == "" {
+					m.enterRepoURLPrompt()
+					return commandResult{KeepInput: true}
+				}
+				return commandResult{Output: m.actionAddRepo(args)}
+			},
+		},
+		{
 			Name:        "skills",
 			Aliases:     []string{"sk"},
 			Description: "Toggle skills via picker, name, or number",
@@ -109,20 +124,6 @@ func builtInCommands() []commandDef {
 			Examples:    []string{"/repos"},
 			Run: func(m *Model, args string) commandResult {
 				return commandResult{Output: m.actionListRepos()}
-			},
-		},
-		{
-			Name:        "repo add",
-			Aliases:     []string{"ra"},
-			Description: "Add one source repository",
-			Usage:       "/repo add <github-url>",
-			Examples:    []string{"/repo add https://github.com/org/repo", "/repo add git@github.com:org/repo.git"},
-			Run: func(m *Model, args string) commandResult {
-				args = strings.TrimSpace(args)
-				if args == "" {
-					return commandResult{Output: errorStyle.Render("Usage: /repo add <github-url>")}
-				}
-				return commandResult{Output: m.actionAddRepo(args)}
 			},
 		},
 		{

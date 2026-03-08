@@ -14,10 +14,11 @@ import (
 const maxPaletteItems = 24
 
 const (
-	defaultContentWidth     = 90
-	minContentWidth         = 10
-	defaultInputPlaceholder = "Type / for commands..."
-	skillPickerPlaceholder  = "Type to search skills..."
+	defaultContentWidth      = 90
+	minContentWidth          = 10
+	defaultInputPlaceholder  = "Type / for commands..."
+	skillPickerPlaceholder   = "Type to search skills..."
+	repoURLPromptPlaceholder = "Type repository URL and press Enter..."
 )
 
 type skillMatch struct {
@@ -57,6 +58,7 @@ type Model struct {
 	skillCursor           int
 	skillOffset           int
 	skillPickerSelections map[string]bool
+	awaitingRepoURL       bool
 
 	history      []string
 	historyIndex int
@@ -203,6 +205,10 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSkillPickerKey(msg)
 	}
 
+	if m.awaitingRepoURL {
+		return m.handleRepoURLPromptKey(msg)
+	}
+
 	switch key {
 	case "enter":
 		return m.submitCommand()
@@ -306,6 +312,42 @@ func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.skillOffset = 0
 	}
 	m.recomputeSkillMatches()
+	m.applyLayout(false)
+	return m, cmd
+}
+
+func (m Model) handleRepoURLPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "enter":
+		return m.submitRepoURL()
+	case "esc":
+		m.exitRepoURLPrompt(true)
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	case "up":
+		m.historyPrev()
+		m.applyLayout(false)
+		return m, nil
+	case "down":
+		m.historyNext()
+		m.applyLayout(false)
+		return m, nil
+	case "ctrl+p":
+		m.historyPrev()
+		m.applyLayout(false)
+		return m, nil
+	case "ctrl+n":
+		m.historyNext()
+		m.applyLayout(false)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	m.historyIndex = len(m.history)
 	m.applyLayout(false)
 	return m, cmd
 }
@@ -414,6 +456,30 @@ func (m Model) submitCommand() (tea.Model, tea.Cmd) {
 	}
 
 	return m, result.Cmd
+}
+
+func (m Model) submitRepoURL() (tea.Model, tea.Cmd) {
+	raw := strings.TrimSpace(m.commandInput.Value())
+	if raw == "" {
+		m.setOutput("", warnStyle.Render("Repository URL cannot be empty."))
+		m.applyLayout(true)
+		return m, nil
+	}
+
+	m.appendHistory(raw)
+	if _, err := config.NormalizeRepository(raw); err != nil {
+		m.setOutput("/add", errorStyle.Render("Invalid repository URL: "+err.Error()))
+		m.applyLayout(true)
+		return m, nil
+	}
+
+	output := m.actionAddRepo(raw)
+	m.setOutput("/add", output)
+
+	m.exitRepoURLPrompt(true)
+	m.historyIndex = len(m.history)
+	m.applyLayout(true)
+	return m, nil
 }
 
 func (m *Model) recomputeMatches() {
@@ -531,6 +597,27 @@ func (m *Model) enterSkillPicker() {
 	m.commandInput.SetValue("")
 	m.commandInput.CursorEnd()
 	m.recomputeSkillMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) enterRepoURLPrompt() {
+	m.awaitingRepoURL = true
+	m.commandInput.Placeholder = repoURLPromptPlaceholder
+	m.commandInput.SetValue("")
+	m.commandInput.CursorEnd()
+	m.setOutput("/add", infoStyle.Render("Enter repository URL and press Enter. Press Esc to cancel."))
+	m.recomputeMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) exitRepoURLPrompt(clearInput bool) {
+	m.awaitingRepoURL = false
+	m.commandInput.Placeholder = defaultInputPlaceholder
+	if clearInput {
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
+	m.recomputeMatches()
 	m.applyLayout(false)
 }
 

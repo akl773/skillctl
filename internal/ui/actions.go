@@ -18,7 +18,7 @@ func (m *Model) actionGitPull() commandResult {
 		return commandResult{Output: warnStyle.Render("A git pull is already running.")}
 	}
 	if len(m.cfg.Repositories) == 0 {
-		return commandResult{Output: warnStyle.Render("No repositories configured. Add one with /repo add <url>.")}
+		return commandResult{Output: warnStyle.Render("No repositories configured. Add one with /add (or /repo add <url>).")}
 	}
 
 	m.gitPullRunning = true
@@ -554,7 +554,7 @@ func (m *Model) actionListRepos() string {
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(mutedStyle.Render("Use /repo add <url> and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to refresh now."))
+	sb.WriteString(mutedStyle.Render("Use /add (or /repo add <url>) and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to refresh now."))
 	return sb.String()
 }
 
