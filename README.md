@@ -84,10 +84,11 @@ Targets can be added or removed from within the TUI at any time.
 ## Common Workflow
 
 1. `/repos` to inspect configured repositories
-2. `/pull` (optional) to force an immediate repository refresh
-3. `/search <query>` to find skills
-4. `/add <skill-id>` (or `/add <catalog-number>`) to select skills
-5. `/sync` to deploy selected skills to all targets
+2. `/add` and then enter a GitHub repository URL to add a new source repository
+3. `/pull` (optional) to force an immediate repository refresh
+4. `/search <query>` to find skills
+5. `/skills` to toggle skills via picker, ID, or catalog number
+6. `/sync` to deploy selected skills to all targets
 
 ## Features
 
