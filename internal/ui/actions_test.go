@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -94,4 +96,35 @@ func TestActionToggleSkillSelection(t *testing.T) {
 		assert.Contains(t, output, "Removed from selection:")
 		assert.Contains(t, output, "repo/alpha")
 	})
+}
+
+func TestApplySkillSelectionChangesAutoSyncsAfterAdd(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	sourceDir := filepath.Join(t.TempDir(), "source-skill")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte("content"), 0o644))
+
+	targetDir := filepath.Join(t.TempDir(), "targets")
+	require.NoError(t, os.MkdirAll(targetDir, 0o755))
+
+	m := Model{
+		paths: paths,
+		cfg: config.Config{
+			SelectedSkills: []string{},
+			Targets:        []string{targetDir},
+		},
+		available: []config.AvailableSkill{
+			{ID: "repo/alpha", Name: "alpha", RepoID: "repo", SourcePath: sourceDir},
+		},
+		availableIDs: []string{"repo/alpha"},
+	}
+
+	output := m.applySkillSelectionChanges([]string{"repo/alpha"}, nil)
+
+	assert.Contains(t, output, "Added:")
+	assert.Contains(t, output, "Auto-deploy after selection")
+	assert.Contains(t, output, "Syncing 1 skill(s) -> 1 target(s)")
+
+	installedPath := filepath.Join(targetDir, config.SkillInstallDirName("repo/alpha"), "SKILL.md")
+	assert.FileExists(t, installedPath)
 }

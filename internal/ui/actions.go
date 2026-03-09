@@ -184,16 +184,31 @@ func (m *Model) applySkillSelectionChanges(addRequested, removeRequested []strin
 
 	addText := strings.TrimSpace(formatAddOutcome(addOutcome))
 	removeText := strings.TrimSpace(formatRemoveOutcome(removeOutcome))
+	autoSyncText := ""
+	if len(addOutcome.Added) > 0 {
+		autoSyncOutcome := core.SyncSelectedSkills(m.cfg, m.available)
+		autoSyncText = strings.TrimSpace(formatSyncOutcome(m.cfg, autoSyncOutcome))
+		if autoSyncText != "" {
+			autoSyncText = infoStyle.Render("Auto-deploy after selection") + "\n" + autoSyncText
+		}
+	}
 
-	switch {
-	case addText == "" && removeText == "":
+	parts := []string{}
+	if addText != "" {
+		parts = append(parts, addText)
+	}
+	if removeText != "" {
+		parts = append(parts, removeText)
+	}
+	if autoSyncText != "" {
+		parts = append(parts, autoSyncText)
+	}
+
+	switch len(parts) {
+	case 0:
 		return infoStyle.Render("No selection changes.")
-	case addText == "":
-		return removeText
-	case removeText == "":
-		return addText
 	default:
-		return addText + "\n\n" + removeText
+		return strings.Join(parts, "\n\n")
 	}
 }
 
@@ -321,46 +336,7 @@ func (m *Model) actionSync() string {
 	}
 
 	outcome := core.SyncSelectedSkills(m.cfg, m.available)
-	if len(outcome.TargetResults) == 0 {
-		result := errorStyle.Render("Nothing to sync.")
-		if len(outcome.MissingInSource) > 0 {
-			result += "\n" + formatMissing(outcome.MissingInSource)
-		}
-		return result
-	}
-
-	var sb strings.Builder
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Syncing %d skill(s) -> %d target(s)",
-		len(m.cfg.SelectedSkills), len(m.cfg.Targets))) + "\n")
-
-	for i, result := range outcome.TargetResults {
-		sb.WriteString(fmt.Sprintf("\n%s [%d/%d] %s\n",
-			infoStyle.Render("Target:"),
-			i+1, len(outcome.TargetResults),
-			config.CompactPath(result.Target),
-		))
-		for _, skill := range result.Synced {
-			sb.WriteString(fmt.Sprintf("  %s  %s\n", successStyle.Render("+"), skill))
-		}
-		for skill, errMsg := range result.Failed {
-			sb.WriteString(fmt.Sprintf("  %s  %s\n", errorStyle.Render("x"), skill))
-			if errMsg != "" {
-				sb.WriteString(mutedStyle.Render(fmt.Sprintf("      %s\n", errMsg)))
-			}
-		}
-		sb.WriteString(mutedStyle.Render(fmt.Sprintf("  synced=%d, failed=%d\n",
-			len(result.Synced), len(result.Failed))))
-	}
-
-	sb.WriteString(fmt.Sprintf("\n%s  Synced: %d  |  Failed: %d",
-		successStyle.Render("OK"),
-		outcome.TotalSynced(), outcome.TotalFailed()))
-
-	if len(outcome.MissingInSource) > 0 {
-		sb.WriteString("\n" + formatMissing(outcome.MissingInSource))
-	}
-
-	return sb.String()
+	return formatSyncOutcome(m.cfg, outcome)
 }
 
 func (m *Model) actionListTargets() string {
@@ -765,5 +741,48 @@ func formatMissing(missing []string) string {
 	for _, s := range missing {
 		sb.WriteString(fmt.Sprintf("  - %s\n", s))
 	}
+	return sb.String()
+}
+
+func formatSyncOutcome(cfg config.Config, outcome core.SyncOutcome) string {
+	if len(outcome.TargetResults) == 0 {
+		result := errorStyle.Render("Nothing to sync.")
+		if len(outcome.MissingInSource) > 0 {
+			result += "\n" + formatMissing(outcome.MissingInSource)
+		}
+		return result
+	}
+
+	var sb strings.Builder
+	sb.WriteString(infoStyle.Render(fmt.Sprintf("Syncing %d skill(s) -> %d target(s)",
+		len(cfg.SelectedSkills), len(cfg.Targets))) + "\n")
+
+	for i, result := range outcome.TargetResults {
+		sb.WriteString(fmt.Sprintf("\n%s [%d/%d] %s\n",
+			infoStyle.Render("Target:"),
+			i+1, len(outcome.TargetResults),
+			config.CompactPath(result.Target),
+		))
+		for _, skill := range result.Synced {
+			sb.WriteString(fmt.Sprintf("  %s  %s\n", successStyle.Render("+"), skill))
+		}
+		for skill, errMsg := range result.Failed {
+			sb.WriteString(fmt.Sprintf("  %s  %s\n", errorStyle.Render("x"), skill))
+			if errMsg != "" {
+				sb.WriteString(mutedStyle.Render(fmt.Sprintf("      %s\n", errMsg)))
+			}
+		}
+		sb.WriteString(mutedStyle.Render(fmt.Sprintf("  synced=%d, failed=%d\n",
+			len(result.Synced), len(result.Failed))))
+	}
+
+	sb.WriteString(fmt.Sprintf("\n%s  Synced: %d  |  Failed: %d",
+		successStyle.Render("OK"),
+		outcome.TotalSynced(), outcome.TotalFailed()))
+
+	if len(outcome.MissingInSource) > 0 {
+		sb.WriteString("\n" + formatMissing(outcome.MissingInSource))
+	}
+
 	return sb.String()
 }
