@@ -45,7 +45,7 @@ func builtInCommands() []commandDef {
 		{
 			Name:        "pull",
 			Aliases:     []string{"update", "git pull"},
-			Description: "Clone or pull all configured repositories",
+			Description: "Sync all configured upstream repositories",
 			Usage:       "/pull",
 			Examples:    []string{"/pull"},
 			Run: func(m *Model, args string) commandResult {

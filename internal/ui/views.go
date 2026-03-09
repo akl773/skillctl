@@ -200,7 +200,7 @@ func (m Model) renderHeader(width int, compact bool, tiny bool) string {
 
 	state := mutedStyle.Render("idle")
 	if m.gitPullRunning {
-		state = statusStyle.Render("pulling updates...")
+		state = statusStyle.Render("syncing upstream sources...")
 	}
 
 	title := lipgloss.JoinHorizontal(
@@ -312,7 +312,7 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
 
 	if len(m.available) == 0 {
-		lines = append(lines, warnStyle.Render(truncateASCII(" No skills available yet. Auto-sync runs on launch; use /pull to retry.", lineWidth)))
+		lines = append(lines, warnStyle.Render(truncateASCII(" No skills available yet. Auto-sync runs on launch; use /pull to sync upstream sources.", lineWidth)))
 	} else if displayCount == 0 {
 		lines = append(lines, warnStyle.Render(truncateASCII(" No matching skills.", lineWidth)))
 	} else {
@@ -413,7 +413,7 @@ func (m Model) renderHelpBar(width int) string {
 		help = "up/down select  tab autocomplete  enter run  esc reset  ctrl+c quit"
 	}
 	if m.gitPullRunning {
-		help = "git pull running... output updates live  esc reset input  ctrl+c quit"
+		help = "upstream sync running... output updates live  esc reset input  ctrl+c quit"
 	}
 	return helpStyle.Width(width).Render(truncateASCII(help, width))
 }

@@ -175,9 +175,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.refresh()
 		} else if silent {
-			m.setOutput("", errorStyle.Render("Background repository sync failed. Run /pull to inspect details and retry."))
+			m.setOutput("", errorStyle.Render("Background upstream sync failed. Run /pull to inspect details and retry."))
 		} else {
-			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: one or more repository updates failed. Resolve git issues before syncing."))
+			m.gitPullOutput.WriteString("\n" + errorStyle.Render("ERROR: one or more upstream repository updates failed. Resolve git issues before syncing."))
 			m.updateOutputContent(m.gitPullOutput.String())
 		}
 		m.gitPullRunning = false
@@ -649,7 +649,7 @@ func (m *Model) recomputeSkillMatches() {
 
 func (m *Model) applySkillPickerSelections() {
 	if len(m.available) == 0 {
-		m.setOutput("", warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
+		m.setOutput("", warnStyle.Render("No skills available yet. Upstream sources sync automatically on launch; use /pull to retry now."))
 		m.exitSkillPicker(true)
 		return
 	}
@@ -702,7 +702,7 @@ func (m *Model) applySkillPickerSelections() {
 func (m *Model) toggleSkillPickerSelection() {
 	if len(m.skillMatches) == 0 {
 		if len(m.available) == 0 {
-			m.setOutput("", warnStyle.Render("No skills available yet. Repositories sync automatically on launch; use /pull to retry now."))
+			m.setOutput("", warnStyle.Render("No skills available yet. Upstream sources sync automatically on launch; use /pull to retry now."))
 		} else {
 			m.setOutput("", warnStyle.Render("No matching skills found."))
 		}

@@ -15,7 +15,7 @@ import (
 
 func (m *Model) actionGitPull() commandResult {
 	if m.gitPullRunning {
-		return commandResult{Output: warnStyle.Render("A git pull is already running.")}
+		return commandResult{Output: warnStyle.Render("An upstream sync is already running.")}
 	}
 	if len(m.cfg.Repositories) == 0 {
 		return commandResult{Output: warnStyle.Render("No repositories configured. Add one with /add (or /repo add <url>).")}
@@ -24,7 +24,7 @@ func (m *Model) actionGitPull() commandResult {
 	m.gitPullRunning = true
 	m.gitPullSilent = false
 	m.gitPullOutput.Reset()
-	m.gitPullOutput.WriteString(infoStyle.Render("Updating configured repositories...") + "\n")
+	m.gitPullOutput.WriteString(infoStyle.Render("Syncing upstream skill sources...") + "\n")
 
 	return commandResult{Output: m.gitPullOutput.String(), Cmd: startGitPullStreamCmd(m.paths, m.cfg.Repositories)}
 }
@@ -530,7 +530,7 @@ func (m *Model) actionListRepos() string {
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(mutedStyle.Render("Use /add (or /repo add <url>) and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to refresh now."))
+	sb.WriteString(mutedStyle.Render("Use /add (or /repo add <url>) and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to sync upstream sources now."))
 	return sb.String()
 }
 
@@ -560,7 +560,7 @@ func (m *Model) actionAddRepo(raw string) string {
 		return errorStyle.Render("Failed to save config: " + err.Error())
 	}
 
-	return successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("It will sync automatically on next launch. Run /pull now to clone and index immediately.")
+	return successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("It will sync automatically on next launch. Run /pull now to sync and index immediately.")
 }
 
 func (m *Model) actionRemoveRepo(raw string) string {
