@@ -40,6 +40,7 @@ brews:
       owner: akl773
       name: homebrew-skillctl
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    skip_upload: true
     homepage: "https://github.com/akl773/skillctl"
     description: "Interactive TUI for managing curated AI skills across agent folders"
     license: "MIT"

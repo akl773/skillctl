@@ -30,3 +30,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Wait for release assets to become downloadable
+        run: bash ./scripts/wait-for-release-assets.sh
+
+      - name: Checkout Homebrew tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: akl773/homebrew-skillctl
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          fetch-depth: 0
+          path: homebrew-tap
+
+      - name: Publish Homebrew formula
+        run: |
+          set -euo pipefail
+
+          cp dist/*.rb homebrew-tap/
+
+          if [ -z "$(git -C homebrew-tap status --porcelain -- '*.rb')" ]; then
+            echo "No Homebrew formula updates to publish."
+            exit 0
+          fi
+
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add '*.rb'
+          git -C homebrew-tap commit -m "Update skillctl formula for ${GITHUB_REF_NAME}"
+          git -C homebrew-tap push
