@@ -215,15 +215,17 @@ func TestRepoURLPromptSubmitAddsRepository(t *testing.T) {
 	m.enterRepoURLPrompt()
 	m.commandInput.SetValue("https://github.com/foo/bar")
 
-	updatedModel, _ := m.handleRepoURLPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updatedModel, cmd := m.handleRepoURLPromptKey(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := updatedModel.(Model)
 
+	require.NotNil(t, cmd)
 	assert.False(t, updated.awaitingRepoURL)
 	assert.Equal(t, defaultInputPlaceholder, updated.commandInput.Placeholder)
 	assert.Equal(t, "", updated.commandInput.Value())
 	require.Len(t, updated.cfg.Repositories, initialRepoCount+1)
 	assert.Equal(t, "foo-bar", updated.cfg.Repositories[len(updated.cfg.Repositories)-1].ID)
 	assert.Contains(t, updated.outputContent, "Added repository")
+	assert.Contains(t, updated.outputContent, "Syncing upstream skill source")
 }
 
 func TestRepoURLPromptSubmitInvalidURLKeepsPromptOpen(t *testing.T) {

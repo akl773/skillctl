@@ -58,7 +58,7 @@ You can add and remove repositories at runtime via `/repo add` and `/repo remove
 1. `skillctl` stores its workspace at `~/.skillctl` by default (override via `--workspace` or `$SKILLCTL_WORKSPACE`).
 2. Repository definitions and selections are stored in `~/.skillctl/.local/skillctl.json`.
 3. On launch, `skillctl` automatically clones or updates each configured repository in the background into `~/.skillctl/.local/repos/<repo-id>`.
-4. `/pull` is still available if you want to force a manual refresh immediately.
+4. `/pull` is still available if you want to force a manual refresh across all repositories.
 5. `skillctl` recursively discovers skills by finding `SKILL.md` files in those local clones.
 6. Skills are selected using namespaced IDs: `<repo-id>/<skill-name>`.
 7. `/sync` rsyncs selected skills to each configured target.
@@ -85,7 +85,7 @@ Targets can be added or removed from within the TUI at any time.
 
 1. `/repos` to inspect configured repositories
 2. `/add` and then enter a GitHub repository URL to add a new source repository
-3. `/pull` (optional) to force an immediate repository refresh
+3. `/add` starts syncing the newly added repository immediately (streamed in the UI)
 4. `/search <query>` to find skills
 5. `/skills` to toggle skills via picker, ID, or catalog number
 6. `/sync` to deploy selected skills to all targets
@@ -98,7 +98,7 @@ Targets can be added or removed from within the TUI at any time.
 - **Multi-target sync** — rsync selected skills to all configured agent folders at once
 - **Repository management** — add/remove/list repositories on the fly
 - **Auto background updates** — repositories sync automatically on app launch
-- **Git integration** — run `/pull` anytime for an immediate refresh
+- **Git integration** — `/add` immediately syncs the new repository; run `/pull` anytime to refresh all repositories
 
 ## Development
 

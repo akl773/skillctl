@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -127,4 +128,32 @@ func TestApplySkillSelectionChangesAutoSyncsAfterAdd(t *testing.T) {
 
 	installedPath := filepath.Join(targetDir, config.SkillInstallDirName("repo/alpha"), "SKILL.md")
 	assert.FileExists(t, installedPath)
+}
+
+func TestActionAddRepoSkipsSecondSyncWhenPullAlreadyRunning(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := Model{
+		paths:          paths,
+		cfg:            config.Config{},
+		gitPullRunning: true,
+		gitPullOutput:  new(strings.Builder),
+	}
+
+	result := m.actionAddRepo("https://github.com/foo/bar")
+
+	assert.Nil(t, result.Cmd)
+	assert.Contains(t, result.Output, "Added repository: foo-bar")
+	assert.Contains(t, result.Output, "An upstream sync is already running")
+	require.Len(t, m.cfg.Repositories, 1)
+	assert.Equal(t, "foo-bar", m.cfg.Repositories[0].ID)
+
+	saved := config.LoadConfig(paths)
+	found := false
+	for _, repo := range saved.Repositories {
+		if repo.ID == "foo-bar" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
 }

@@ -473,13 +473,13 @@ func (m Model) submitRepoURL() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	output := m.actionAddRepo(raw)
-	m.setOutput("/add", output)
+	result := m.actionAddRepo(raw)
+	m.setOutput("/add", result.Output)
 
 	m.exitRepoURLPrompt(true)
 	m.historyIndex = len(m.history)
 	m.applyLayout(true)
-	return m, nil
+	return m, result.Cmd
 }
 
 func (m *Model) recomputeMatches() {

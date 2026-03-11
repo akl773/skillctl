@@ -220,6 +220,24 @@ func TestAddCommandWithoutArgsEntersRepoURLPrompt(t *testing.T) {
 	assert.Equal(t, repoURLPromptPlaceholder, m.commandInput.Placeholder)
 }
 
+func TestAddCommandWithURLStartsImmediateSyncStream(t *testing.T) {
+	commands := builtInCommands()
+	cmd, args, ok := resolveCommand(commands, "/add https://github.com/foo/bar")
+	require.True(t, ok)
+	assert.Equal(t, "add", cmd.Name)
+	assert.Equal(t, "https://github.com/foo/bar", args)
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+
+	result := cmd.Run(&m, args)
+	require.NotNil(t, result.Cmd)
+	assert.Contains(t, result.Output, "Added repository")
+	assert.Contains(t, result.Output, "Syncing upstream skill source")
+	assert.True(t, m.gitPullRunning)
+	assert.False(t, m.gitPullSilent)
+}
+
 func testCommandDefs() []commandDef {
 	return []commandDef{
 		{

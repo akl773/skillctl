@@ -88,7 +88,7 @@ func builtInCommands() []commandDef {
 					m.enterRepoURLPrompt()
 					return commandResult{KeepInput: true}
 				}
-				return commandResult{Output: m.actionAddRepo(args)}
+				return m.actionAddRepo(args)
 			},
 		},
 		{

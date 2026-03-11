@@ -534,33 +534,48 @@ func (m *Model) actionListRepos() string {
 	return sb.String()
 }
 
-func (m *Model) actionAddRepo(raw string) string {
+func (m *Model) actionAddRepo(raw string) commandResult {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return warnStyle.Render("Repository URL cannot be empty.")
+		return commandResult{Output: warnStyle.Render("Repository URL cannot be empty.")}
 	}
 
 	repo, err := config.NormalizeRepository(raw)
 	if err != nil {
-		return errorStyle.Render("Invalid repository URL: " + err.Error())
+		return commandResult{Output: errorStyle.Render("Invalid repository URL: " + err.Error())}
 	}
 
 	for _, existing := range m.cfg.Repositories {
 		if strings.EqualFold(existing.ID, repo.ID) {
-			return warnStyle.Render("Repository already exists: " + existing.ID)
+			return commandResult{Output: warnStyle.Render("Repository already exists: " + existing.ID)}
 		}
 		if strings.EqualFold(existing.URL, repo.URL) {
-			return warnStyle.Render("Repository already exists: " + existing.URL)
+			return commandResult{Output: warnStyle.Render("Repository already exists: " + existing.URL)}
 		}
 	}
 
 	m.cfg.Repositories = append(m.cfg.Repositories, repo)
 	m.cfg.RemovedDefaultRepos = removeStringCaseInsensitive(m.cfg.RemovedDefaultRepos, repo.ID)
 	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
-		return errorStyle.Render("Failed to save config: " + err.Error())
+		return commandResult{Output: errorStyle.Render("Failed to save config: " + err.Error())}
 	}
 
-	return successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("It will sync automatically on next launch. Run /pull now to sync and index immediately.")
+	if m.gitPullRunning {
+		return commandResult{
+			Output: successStyle.Render("Added repository: "+repo.ID) + "\n" + mutedStyle.Render("An upstream sync is already running. Saved the repository and skipped starting another sync."),
+		}
+	}
+
+	m.gitPullRunning = true
+	m.gitPullSilent = false
+	m.gitPullOutput.Reset()
+	m.gitPullOutput.WriteString(successStyle.Render("Added repository: "+repo.ID) + "\n")
+	m.gitPullOutput.WriteString(infoStyle.Render("Syncing upstream skill source...") + "\n")
+
+	return commandResult{
+		Output: m.gitPullOutput.String(),
+		Cmd:    startGitPullStreamCmd(m.paths, []config.Repository{repo}),
+	}
 }
 
 func (m *Model) actionRemoveRepo(raw string) string {
