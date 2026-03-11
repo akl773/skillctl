@@ -341,7 +341,7 @@ func WriteJSON(path string, data interface{}) error {
 		return err
 	}
 	b = append(b, '\n')
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, b, 0o600)
 }
 
 // --- Path helpers ---

@@ -13,6 +13,11 @@ import (
 	"akhilsingh.in/skillctl/internal/config"
 )
 
+var (
+	gitBinary   = resolveCommandPath("git")
+	rsyncBinary = resolveCommandPath("rsync")
+)
+
 // --- Outcome types ---
 
 // RepoPullResult captures clone/pull output for a single repository.
@@ -127,9 +132,9 @@ func RunGitPullStream(
 		var cmd *exec.Cmd
 		if action == "clone" {
 			_ = os.MkdirAll(filepath.Dir(repoPath), 0o755)
-			cmd = exec.Command("git", "clone", "--depth", "1", "--progress", repo.URL, repoPath)
+			cmd = exec.Command(gitBinary, "clone", "--depth", "1", "--progress", repo.URL, repoPath)
 		} else {
-			cmd = exec.Command("git", "-C", repoPath, "pull", "--ff-only", "--progress")
+			cmd = exec.Command(gitBinary, "-C", repoPath, "pull", "--ff-only", "--progress")
 		}
 
 		rc, stdout, stderr := runCommandStream(cmd, onStdout, onStderr)
@@ -343,7 +348,7 @@ func SyncSelectedSkills(cfg config.Config, available []config.AvailableSkill) Sy
 			dst := filepath.Join(targetPath, config.SkillInstallDirName(skill.ID))
 			_ = os.MkdirAll(dst, 0o755)
 
-			cmd := exec.Command("rsync", "-a", "--delete", skill.SourcePath+"/", dst+"/")
+			cmd := exec.Command(rsyncBinary, "-a", "--delete", skill.SourcePath+"/", dst+"/")
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				result.Failed[skill.ID] = strings.TrimSpace(string(out))
@@ -379,6 +384,14 @@ func closestMatches(name string, candidates []string, n int) []string {
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+func resolveCommandPath(name string) string {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return name
+	}
+	return path
 }
 
 func removePath(path string) {
