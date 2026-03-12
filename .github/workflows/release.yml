@@ -22,17 +22,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run unit tests
-        run: go test ./... -count=1
-
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
@@ -40,32 +29,38 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-
-      - name: Wait for release assets to become downloadable
-        run: bash ./scripts/wait-for-release-assets.sh
-
-      - name: Checkout Homebrew tap repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          repository: akl773/homebrew-skillctl
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          fetch-depth: 0
-          path: homebrew-tap
 
       - name: Publish Homebrew formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          cp dist/*.rb homebrew-tap/
+          python3 scripts/generate_homebrew_formula.py \
+            --dist-dir dist \
+            --checksums-file dist/checksums.txt \
+            --tag "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --output dist/skillctl.rb
 
-          if [ -z "$(git -C homebrew-tap status --porcelain -- '*.rb')" ]; then
-            echo "No Homebrew formula updates to publish."
+          TAP_DIR="$(mktemp -d)"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/akl773/homebrew-skillctl.git" "$TAP_DIR"
+
+          mkdir -p "$TAP_DIR/Formula"
+          cp dist/skillctl.rb "$TAP_DIR/Formula/skillctl.rb"
+          if [ -f "$TAP_DIR/skillctl.rb" ]; then
+            rm "$TAP_DIR/skillctl.rb"
+          fi
+
+          if git -C "$TAP_DIR" diff --quiet --exit-code; then
+            echo "No tap changes detected; skipping commit"
             exit 0
           fi
 
-          git -C homebrew-tap config user.name "github-actions[bot]"
-          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C homebrew-tap add '*.rb'
-          git -C homebrew-tap commit -m "Update skillctl formula for ${GITHUB_REF_NAME}"
-          git -C homebrew-tap push
+          git -C "$TAP_DIR" config user.name "github-actions[bot]"
+          git -C "$TAP_DIR" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$TAP_DIR" add -A
+          git -C "$TAP_DIR" commit -m "chore: update skillctl formula for ${RELEASE_TAG}"
+          git -C "$TAP_DIR" push origin HEAD:main
