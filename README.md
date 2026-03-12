@@ -9,8 +9,7 @@ An interactive TUI for managing and syncing AI skills from multiple GitHub repos
 ### Homebrew (recommended)
 
 ```bash
-brew tap akl773/skillctl
-brew install skillctl
+brew install akl773/skillctl/skillctl
 ```
 
 ### From source
@@ -21,7 +20,7 @@ cd skillctl
 make install
 ```
 
-> Requires Go 1.24+
+> Requires Go 1.25+
 
 ## Prerequisites
 
@@ -120,7 +119,7 @@ make cover    # Run tests with coverage summary
 ## Releasing
 
 Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
-Push a version tag to trigger a release and update the Homebrew formula automatically:
+Push a version tag to trigger a release:
 
 ```bash
 git tag v1.0.0
