@@ -1,9 +1,11 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"akhilsingh.in/skillctl/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -171,6 +173,104 @@ func TestGitPullOutcomeSuccess(t *testing.T) {
 	assert.True(t, GitPullOutcome{}.Success())
 	assert.True(t, GitPullOutcome{Results: []RepoPullResult{{RepoID: "a", ReturnCode: 0}}}.Success())
 	assert.False(t, GitPullOutcome{Results: []RepoPullResult{{RepoID: "a", ReturnCode: 1}}}.Success())
+}
+
+func TestRunGitPullStreamProcessesReposInParallel(t *testing.T) {
+	paths := config.AppPaths{RepoCacheDir: filepath.Join(t.TempDir(), "repos")}
+	repositories := []config.Repository{
+		{ID: "org/repo-one", URL: "https://example.com/repo-one.git"},
+		{ID: "org/repo-two", URL: "https://example.com/repo-two.git"},
+		{ID: "org/repo-three", URL: "https://example.com/repo-three.git"},
+	}
+
+	gitPath := installFakeGitBinary(t)
+	originalGitBinary := gitBinary
+	gitBinary = gitPath
+	t.Cleanup(func() { gitBinary = originalGitBinary })
+	t.Setenv("SKILLCTL_FAKE_GIT_SLEEP_SECS", "1")
+
+	start := time.Now()
+	outcome := RunGitPullStream(paths, repositories, nil, nil)
+	elapsed := time.Since(start)
+
+	require.Len(t, outcome.Results, len(repositories))
+	for i, result := range outcome.Results {
+		assert.Equal(t, repositories[i].ID, result.RepoID)
+		assert.Equal(t, repositories[i].URL, result.RepoURL)
+		assert.Equal(t, "clone", result.Action)
+		assert.Equal(t, 0, result.ReturnCode)
+	}
+
+	assert.Less(t, elapsed, 2*time.Second)
+}
+
+func TestRunGitPullStreamPreservesResultOrderAndAction(t *testing.T) {
+	paths := config.AppPaths{RepoCacheDir: filepath.Join(t.TempDir(), "repos")}
+	repositories := []config.Repository{
+		{ID: "org/already-one", URL: "https://example.com/already-one.git"},
+		{ID: "org/new-two", URL: "https://example.com/new-two.git"},
+		{ID: "org/already-three", URL: "https://example.com/already-three.git"},
+	}
+
+	require.NoError(t, os.MkdirAll(paths.RepoPath(repositories[0].ID), 0o755))
+	require.NoError(t, os.MkdirAll(paths.RepoPath(repositories[2].ID), 0o755))
+
+	gitPath := installFakeGitBinary(t)
+	originalGitBinary := gitBinary
+	gitBinary = gitPath
+	t.Cleanup(func() { gitBinary = originalGitBinary })
+
+	outcome := RunGitPullStream(paths, repositories, nil, nil)
+
+	require.Len(t, outcome.Results, len(repositories))
+
+	assert.Equal(t, repositories[0].ID, outcome.Results[0].RepoID)
+	assert.Equal(t, "pull", outcome.Results[0].Action)
+	assert.Equal(t, 0, outcome.Results[0].ReturnCode)
+
+	assert.Equal(t, repositories[1].ID, outcome.Results[1].RepoID)
+	assert.Equal(t, "clone", outcome.Results[1].Action)
+	assert.Equal(t, 0, outcome.Results[1].ReturnCode)
+
+	assert.Equal(t, repositories[2].ID, outcome.Results[2].RepoID)
+	assert.Equal(t, "pull", outcome.Results[2].Action)
+	assert.Equal(t, 0, outcome.Results[2].ReturnCode)
+}
+
+func installFakeGitBinary(t *testing.T) string {
+	t.Helper()
+
+	binDir := t.TempDir()
+	gitPath := filepath.Join(binDir, "git")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+
+sleep_secs=${SKILLCTL_FAKE_GIT_SLEEP_SECS:-0}
+if [ "$sleep_secs" -gt 0 ]; then
+  sleep "$sleep_secs"
+fi
+
+if [ "$#" -gt 0 ] && [ "$1" = "clone" ]; then
+  target=""
+  for arg in "$@"; do
+    target="$arg"
+  done
+  mkdir -p "$target"
+  printf 'cloned %%s\n' "$target"
+  exit 0
+fi
+
+if [ "$#" -ge 3 ] && [ "$1" = "-C" ] && [ "$3" = "pull" ]; then
+  printf 'pulled %%s\n' "$2"
+  exit 0
+fi
+
+printf 'unexpected args: %%s\n' "$*" >&2
+exit 1
+`)
+
+	require.NoError(t, os.WriteFile(gitPath, []byte(script), 0o755))
+	return gitPath
 }
 
 func TestSyncSelectedSkills(t *testing.T) {

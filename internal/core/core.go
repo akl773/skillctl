@@ -116,39 +116,50 @@ func RunGitPullStream(
 ) GitPullOutcome {
 	_ = os.MkdirAll(paths.RepoCacheDir, 0o755)
 
-	var outcome GitPullOutcome
-	for _, repo := range repositories {
-		repoPath := paths.RepoPath(repo.ID)
-		action := "pull"
+	outcome := GitPullOutcome{Results: make([]RepoPullResult, len(repositories))}
+	var wg sync.WaitGroup
 
-		if !exists(repoPath) {
-			action = "clone"
-		}
+	for i, repo := range repositories {
+		i := i
+		repo := repo
+		wg.Add(1)
 
-		if onStdout != nil {
-			onStdout(fmt.Sprintf("\n[%s] %s\n", repo.ID, strings.ToUpper(action)))
-		}
+		go func() {
+			defer wg.Done()
 
-		var cmd *exec.Cmd
-		if action == "clone" {
-			_ = os.MkdirAll(filepath.Dir(repoPath), 0o755)
-			cmd = exec.Command(gitBinary, "clone", "--depth", "1", "--progress", repo.URL, repoPath)
-		} else {
-			cmd = exec.Command(gitBinary, "-C", repoPath, "pull", "--ff-only", "--progress")
-		}
+			repoPath := paths.RepoPath(repo.ID)
+			action := "pull"
 
-		rc, stdout, stderr := runCommandStream(cmd, onStdout, onStderr)
-		outcome.Results = append(outcome.Results, RepoPullResult{
-			RepoID:       repo.ID,
-			RepoURL:      repo.URL,
-			Action:       action,
-			ReturnCode:   rc,
-			Stdout:       stdout,
-			Stderr:       stderr,
-			LocalRepoDir: repoPath,
-		})
+			if !exists(repoPath) {
+				action = "clone"
+			}
+
+			if onStdout != nil {
+				onStdout(fmt.Sprintf("\n[%s] %s\n", repo.ID, strings.ToUpper(action)))
+			}
+
+			var cmd *exec.Cmd
+			if action == "clone" {
+				_ = os.MkdirAll(filepath.Dir(repoPath), 0o755)
+				cmd = exec.Command(gitBinary, "clone", "--depth", "1", "--progress", repo.URL, repoPath)
+			} else {
+				cmd = exec.Command(gitBinary, "-C", repoPath, "pull", "--ff-only", "--progress")
+			}
+
+			rc, stdout, stderr := runCommandStream(cmd, onStdout, onStderr)
+			outcome.Results[i] = RepoPullResult{
+				RepoID:       repo.ID,
+				RepoURL:      repo.URL,
+				Action:       action,
+				ReturnCode:   rc,
+				Stdout:       stdout,
+				Stderr:       stderr,
+				LocalRepoDir: repoPath,
+			}
+		}()
 	}
 
+	wg.Wait()
 	return outcome
 }
 
