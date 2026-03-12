@@ -1,10 +1,9 @@
-name: CI
+name: CI Tag
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read

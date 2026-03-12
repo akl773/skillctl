@@ -1,21 +1,57 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows:
+      - CI Tag
+    types:
+      - completed
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve release tag
+        id: resolve_tag
+        env:
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${RUN_HEAD_SHA}" ]; then
+            echo "workflow_run.head_sha is empty" >&2
+            exit 1
+          fi
+
+          if [ -n "${RUN_HEAD_BRANCH}" ] && [[ "${RUN_HEAD_BRANCH}" == v* ]]; then
+            if git rev-parse -q --verify "refs/tags/${RUN_HEAD_BRANCH}" >/dev/null; then
+              TAG_SHA="$(git rev-list -n 1 "refs/tags/${RUN_HEAD_BRANCH}")"
+              if [ "${TAG_SHA}" = "${RUN_HEAD_SHA}" ]; then
+                echo "tag=${RUN_HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          fi
+
+          mapfile -t TAGS < <(git tag --points-at "${RUN_HEAD_SHA}" --list 'v*')
+
+          if [ "${#TAGS[@]}" -ne 1 ]; then
+            echo "Expected exactly one v* tag at ${RUN_HEAD_SHA}, found ${#TAGS[@]} (${TAGS[*]:-none})" >&2
+            exit 1
+          fi
+
+          echo "tag=${TAGS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -33,7 +69,7 @@ jobs:
       - name: Publish Homebrew formula
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.resolve_tag.outputs.tag }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
