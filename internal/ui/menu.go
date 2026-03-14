@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,13 +21,34 @@ const (
 	minContentWidth          = 10
 	defaultInputPlaceholder  = "Type / for commands..."
 	skillPickerPlaceholder   = "Type to search skills..."
+	importAgentPlaceholder   = "Type to search agents..."
+	importSkillPlaceholder   = "Type to search skills..."
 	repoURLPromptPlaceholder = "Type repository URL and press Enter..."
+	managedImportSourceID    = "skillctl-imported"
 )
 
 type skillMatch struct {
 	Skill        config.AvailableSkill
 	CatalogIndex int
 	Selected     bool
+}
+
+type importAgentOption struct {
+	ID     string
+	Name   string
+	Path   string
+	Skills []importSkillCandidate
+}
+
+type importSkillCandidate struct {
+	Key      string
+	Name     string
+	Source   string
+	Relative string
+}
+
+type importSkillMatch struct {
+	Skill importSkillCandidate
 }
 
 // Model is the root bubbletea model.
@@ -59,6 +83,17 @@ type Model struct {
 	skillOffset           int
 	skillPickerSelections map[string]bool
 	awaitingRepoURL       bool
+	importAgentPickerOpen bool
+	importAgentOptions    []importAgentOption
+	importAgentMatches    []importAgentOption
+	importAgentCursor     int
+	importAgentOffset     int
+	importSkillPickerOpen bool
+	importAgentChosen     importAgentOption
+	importSkillMatches    []importSkillMatch
+	importSkillCursor     int
+	importSkillOffset     int
+	importSkillSelections map[string]bool
 
 	history      []string
 	historyIndex int
@@ -203,6 +238,14 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.skillPickerOpen {
 		return m.handleSkillPickerKey(msg)
+	}
+
+	if m.importAgentPickerOpen {
+		return m.handleImportAgentPickerKey(msg)
+	}
+
+	if m.importSkillPickerOpen {
+		return m.handleImportSkillPickerKey(msg)
 	}
 
 	if m.awaitingRepoURL {
@@ -352,6 +395,90 @@ func (m Model) handleRepoURLPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleImportAgentPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "enter":
+		m.enterImportSkillPicker()
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	case "up":
+		m.moveImportAgentPicker(-1)
+		m.applyLayout(false)
+		return m, nil
+	case "down", "tab":
+		m.moveImportAgentPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "pgup", "pgdown", "home", "end":
+		var cmd tea.Cmd
+		m.chatViewport, cmd = m.chatViewport.Update(msg)
+		return m, cmd
+	case "esc":
+		m.exitImportAgentPicker(true)
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	prev := m.commandInput.Value()
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	if m.commandInput.Value() != prev {
+		m.importAgentCursor = 0
+		m.importAgentOffset = 0
+	}
+	m.recomputeImportAgentMatches()
+	m.applyLayout(false)
+	return m, cmd
+}
+
+func (m Model) handleImportSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "enter":
+		m.applyImportSkillSelections()
+		m.historyIndex = len(m.history)
+		m.applyLayout(true)
+		return m, nil
+	case " ", "space":
+		m.toggleImportSkillSelection()
+		m.applyLayout(false)
+		return m, nil
+	case "up":
+		m.moveImportSkillPicker(-1)
+		m.applyLayout(false)
+		return m, nil
+	case "down", "tab":
+		m.moveImportSkillPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "pgup", "pgdown", "home", "end":
+		var cmd tea.Cmd
+		m.chatViewport, cmd = m.chatViewport.Update(msg)
+		return m, cmd
+	case "esc":
+		m.exitImportSkillPicker(true)
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	prev := m.commandInput.Value()
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	if m.commandInput.Value() != prev {
+		m.importSkillCursor = 0
+		m.importSkillOffset = 0
+	}
+	m.recomputeImportSkillMatches()
+	m.applyLayout(false)
+	return m, cmd
+}
+
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
@@ -361,6 +488,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonWheelUp:
 		if m.skillPickerOpen {
 			m.moveSkillPicker(-1)
+			return m, nil
+		}
+		if m.importAgentPickerOpen {
+			m.moveImportAgentPicker(-1)
+			return m, nil
+		}
+		if m.importSkillPickerOpen {
+			m.moveImportSkillPicker(-1)
 			return m, nil
 		}
 		if m.paletteOpen() {
@@ -373,6 +508,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonWheelDown:
 		if m.skillPickerOpen {
 			m.moveSkillPicker(1)
+			return m, nil
+		}
+		if m.importAgentPickerOpen {
+			m.moveImportAgentPicker(1)
+			return m, nil
+		}
+		if m.importSkillPickerOpen {
+			m.moveImportSkillPicker(1)
 			return m, nil
 		}
 		if m.paletteOpen() {
@@ -490,6 +633,20 @@ func (m *Model) recomputeMatches() {
 		return
 	}
 
+	if m.importAgentPickerOpen {
+		m.matches = nil
+		m.paletteCursor = 0
+		m.recomputeImportAgentMatches()
+		return
+	}
+
+	if m.importSkillPickerOpen {
+		m.matches = nil
+		m.paletteCursor = 0
+		m.recomputeImportSkillMatches()
+		return
+	}
+
 	if !hasCommandPrefix(m.commandInput.Value()) {
 		m.matches = nil
 		m.paletteCursor = 0
@@ -552,10 +709,14 @@ func (m Model) visibleSkillMatches() []skillMatch {
 }
 
 func (m Model) paletteOpen() bool {
-	if m.skillPickerOpen {
+	if m.anyPickerOpen() {
 		return false
 	}
 	return hasCommandPrefix(m.commandInput.Value()) && len(m.visibleMatches()) > 0
+}
+
+func (m Model) anyPickerOpen() bool {
+	return m.skillPickerOpen || m.importAgentPickerOpen || m.importSkillPickerOpen
 }
 
 func (m *Model) movePalette(delta int) {
@@ -588,7 +749,41 @@ func (m *Model) moveSkillPicker(delta int) {
 	m.clampSkillWindow()
 }
 
+func (m *Model) moveImportAgentPicker(delta int) {
+	if len(m.importAgentMatches) == 0 {
+		return
+	}
+
+	m.importAgentCursor += delta
+	if m.importAgentCursor < 0 {
+		m.importAgentCursor = len(m.importAgentMatches) - 1
+	}
+	if m.importAgentCursor >= len(m.importAgentMatches) {
+		m.importAgentCursor = 0
+	}
+
+	m.clampImportAgentWindow()
+}
+
+func (m *Model) moveImportSkillPicker(delta int) {
+	if len(m.importSkillMatches) == 0 {
+		return
+	}
+
+	m.importSkillCursor += delta
+	if m.importSkillCursor < 0 {
+		m.importSkillCursor = len(m.importSkillMatches) - 1
+	}
+	if m.importSkillCursor >= len(m.importSkillMatches) {
+		m.importSkillCursor = 0
+	}
+
+	m.clampImportSkillWindow()
+}
+
 func (m *Model) enterSkillPicker() {
+	m.exitImportAgentPicker(true)
+	m.exitImportSkillPicker(true)
 	m.skillPickerOpen = true
 	m.skillCursor = 0
 	m.skillOffset = 0
@@ -597,6 +792,60 @@ func (m *Model) enterSkillPicker() {
 	m.commandInput.SetValue("")
 	m.commandInput.CursorEnd()
 	m.recomputeSkillMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) enterImportAgentPicker() {
+	m.exitSkillPicker(true)
+	m.exitImportSkillPicker(true)
+
+	agents := m.discoverImportAgents()
+	if len(agents) == 0 {
+		m.setOutput("/import", warnStyle.Render("No unmanaged local skills found in supported agent folders."))
+		m.applyLayout(true)
+		return
+	}
+
+	m.importAgentPickerOpen = true
+	m.importAgentOptions = agents
+	m.importAgentMatches = agents
+	m.importAgentCursor = 0
+	m.importAgentOffset = 0
+	m.commandInput.Placeholder = importAgentPlaceholder
+	m.commandInput.SetValue("")
+	m.commandInput.CursorEnd()
+	m.recomputeImportAgentMatches()
+	m.setOutput("/import", infoStyle.Render("Select an agent to import unmanaged local skills. Press Enter to continue, Esc to cancel."))
+	m.applyLayout(false)
+}
+
+func (m *Model) enterImportSkillPicker() {
+	if len(m.importAgentMatches) == 0 {
+		m.setOutput("/import", warnStyle.Render("No matching agents found."))
+		m.applyLayout(true)
+		return
+	}
+
+	if m.importAgentCursor < 0 || m.importAgentCursor >= len(m.importAgentMatches) {
+		m.importAgentCursor = 0
+	}
+
+	agent := m.importAgentMatches[m.importAgentCursor]
+	m.importAgentChosen = agent
+	m.importAgentPickerOpen = false
+	m.importAgentMatches = nil
+	m.importAgentCursor = 0
+	m.importAgentOffset = 0
+
+	m.importSkillPickerOpen = true
+	m.importSkillCursor = 0
+	m.importSkillOffset = 0
+	m.importSkillSelections = make(map[string]bool)
+	m.commandInput.Placeholder = importSkillPlaceholder
+	m.commandInput.SetValue("")
+	m.commandInput.CursorEnd()
+	m.recomputeImportSkillMatches()
+	m.setOutput("/import", infoStyle.Render(fmt.Sprintf("Select unmanaged local skills from %s. Space toggles, Enter imports, Esc cancels.", agent.Name)))
 	m.applyLayout(false)
 }
 
@@ -613,6 +862,41 @@ func (m *Model) enterRepoURLPrompt() {
 func (m *Model) exitRepoURLPrompt(clearInput bool) {
 	m.awaitingRepoURL = false
 	m.commandInput.Placeholder = defaultInputPlaceholder
+	if clearInput {
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
+	m.recomputeMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) exitImportAgentPicker(clearInput bool) {
+	m.importAgentPickerOpen = false
+	m.importAgentOptions = nil
+	m.importAgentMatches = nil
+	m.importAgentCursor = 0
+	m.importAgentOffset = 0
+	if !m.importSkillPickerOpen && !m.skillPickerOpen {
+		m.commandInput.Placeholder = defaultInputPlaceholder
+	}
+	if clearInput {
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
+	m.recomputeMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) exitImportSkillPicker(clearInput bool) {
+	m.importSkillPickerOpen = false
+	m.importAgentChosen = importAgentOption{}
+	m.importSkillMatches = nil
+	m.importSkillCursor = 0
+	m.importSkillOffset = 0
+	m.importSkillSelections = nil
+	if !m.importAgentPickerOpen && !m.skillPickerOpen {
+		m.commandInput.Placeholder = defaultInputPlaceholder
+	}
 	if clearInput {
 		m.commandInput.SetValue("")
 		m.commandInput.CursorEnd()
@@ -645,6 +929,389 @@ func (m *Model) recomputeSkillMatches() {
 	}
 
 	m.clampSkillWindow()
+}
+
+func (m *Model) recomputeImportAgentMatches() {
+	query := strings.ToLower(strings.TrimSpace(m.commandInput.Value()))
+	if query == "" {
+		m.importAgentMatches = append([]importAgentOption(nil), m.importAgentOptions...)
+	} else {
+		filtered := make([]importAgentOption, 0, len(m.importAgentOptions))
+		for _, agent := range m.importAgentOptions {
+			if strings.Contains(strings.ToLower(agent.Name), query) || strings.Contains(strings.ToLower(agent.ID), query) {
+				filtered = append(filtered, agent)
+			}
+		}
+		m.importAgentMatches = filtered
+	}
+
+	if len(m.importAgentMatches) == 0 {
+		m.importAgentCursor = 0
+		m.importAgentOffset = 0
+		return
+	}
+	m.clampImportAgentWindow()
+}
+
+func (m *Model) recomputeImportSkillMatches() {
+	query := strings.ToLower(strings.TrimSpace(m.commandInput.Value()))
+	matches := make([]importSkillMatch, 0, len(m.importAgentChosen.Skills))
+	for _, candidate := range m.importAgentChosen.Skills {
+		if query != "" {
+			name := strings.ToLower(candidate.Name)
+			rel := strings.ToLower(candidate.Relative)
+			if !strings.Contains(name, query) && !strings.Contains(rel, query) {
+				continue
+			}
+		}
+		matches = append(matches, importSkillMatch{Skill: candidate})
+	}
+	m.importSkillMatches = matches
+
+	if len(m.importSkillMatches) == 0 {
+		m.importSkillCursor = 0
+		m.importSkillOffset = 0
+		return
+	}
+	m.clampImportSkillWindow()
+}
+
+func (m *Model) applyImportSkillSelections() {
+	if len(m.importSkillSelections) == 0 {
+		m.setOutput("/import", infoStyle.Render("No selection changes."))
+		m.exitImportSkillPicker(true)
+		return
+	}
+
+	sourcePath := filepath.Join(m.paths.LocalDir, "imported-skills")
+	repo, repoAdded, repoErr := m.ensureManagedImportSource(sourcePath)
+	if repoErr != nil {
+		m.setOutput("/import", errorStyle.Render("Failed to prepare managed local source: "+repoErr.Error()))
+		m.exitImportSkillPicker(true)
+		return
+	}
+
+	selected := m.selectedImportSkills()
+	if len(selected) == 0 {
+		m.setOutput("/import", infoStyle.Render("No selection changes."))
+		m.exitImportSkillPicker(true)
+		return
+	}
+
+	if err := os.MkdirAll(sourcePath, 0o755); err != nil {
+		m.setOutput("/import", errorStyle.Render("Failed to create managed local source: "+err.Error()))
+		m.exitImportSkillPicker(true)
+		return
+	}
+
+	importedIDs := make([]string, 0, len(selected))
+	usedNames := make(map[string]bool)
+	for _, candidate := range selected {
+		dirName := sanitizeImportDirName(candidate.Relative)
+		if dirName == "" {
+			dirName = sanitizeImportDirName(candidate.Name)
+		}
+		if dirName == "" {
+			continue
+		}
+		base := dirName
+		seq := 2
+		for usedNames[strings.ToLower(dirName)] {
+			dirName = fmt.Sprintf("%s-%d", base, seq)
+			seq++
+		}
+		usedNames[strings.ToLower(dirName)] = true
+
+		dstPath := filepath.Join(sourcePath, dirName)
+		if err := os.RemoveAll(dstPath); err != nil {
+			m.setOutput("/import", errorStyle.Render("Failed to update imported skill: "+err.Error()))
+			m.exitImportSkillPicker(true)
+			return
+		}
+		if err := copyDir(candidate.Source, dstPath); err != nil {
+			m.setOutput("/import", errorStyle.Render("Failed to import skill: "+err.Error()))
+			m.exitImportSkillPicker(true)
+			return
+		}
+		importedIDs = append(importedIDs, repo.ID+"/"+dirName)
+	}
+
+	m.refresh()
+	output := m.applySkillSelectionChanges(importedIDs, nil)
+	if repoAdded {
+		output = successStyle.Render("Created managed local import source.") + "\n\n" + output
+	}
+	m.setOutput("/import", output)
+	m.exitImportSkillPicker(true)
+}
+
+func (m Model) selectedImportSkills() []importSkillCandidate {
+	if len(m.importSkillSelections) == 0 {
+		return nil
+	}
+
+	selected := make([]importSkillCandidate, 0, len(m.importSkillSelections))
+	for _, match := range m.importSkillMatches {
+		if !m.importSkillSelections[strings.ToLower(match.Skill.Key)] {
+			continue
+		}
+		selected = append(selected, match.Skill)
+	}
+	if len(selected) > 0 {
+		return selected
+	}
+
+	for _, candidate := range m.importAgentChosen.Skills {
+		if m.importSkillSelections[strings.ToLower(candidate.Key)] {
+			selected = append(selected, candidate)
+		}
+	}
+	return selected
+}
+
+func (m *Model) toggleImportSkillSelection() {
+	if len(m.importSkillMatches) == 0 {
+		m.setOutput("/import", warnStyle.Render("No matching skills found."))
+		return
+	}
+
+	if m.importSkillCursor < 0 || m.importSkillCursor >= len(m.importSkillMatches) {
+		m.importSkillCursor = 0
+	}
+
+	chosen := m.importSkillMatches[m.importSkillCursor]
+	key := strings.ToLower(chosen.Skill.Key)
+	current := m.importSkillSelections[key]
+	m.importSkillSelections[key] = !current
+	if !m.importSkillSelections[key] {
+		delete(m.importSkillSelections, key)
+	}
+}
+
+func (m *Model) clampImportAgentWindow() {
+	count := len(m.importAgentMatches)
+	if count == 0 {
+		m.importAgentCursor = 0
+		m.importAgentOffset = 0
+		return
+	}
+
+	if m.importAgentCursor < 0 {
+		m.importAgentCursor = 0
+	}
+	if m.importAgentCursor >= count {
+		m.importAgentCursor = count - 1
+	}
+
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if limit > count {
+		limit = count
+	}
+
+	maxOffset := count - limit
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	if m.importAgentOffset < 0 {
+		m.importAgentOffset = 0
+	}
+	if m.importAgentOffset > maxOffset {
+		m.importAgentOffset = maxOffset
+	}
+
+	if m.importAgentCursor < m.importAgentOffset {
+		m.importAgentOffset = m.importAgentCursor
+	}
+	if m.importAgentCursor >= m.importAgentOffset+limit {
+		m.importAgentOffset = m.importAgentCursor - limit + 1
+	}
+}
+
+func (m *Model) clampImportSkillWindow() {
+	count := len(m.importSkillMatches)
+	if count == 0 {
+		m.importSkillCursor = 0
+		m.importSkillOffset = 0
+		return
+	}
+
+	if m.importSkillCursor < 0 {
+		m.importSkillCursor = 0
+	}
+	if m.importSkillCursor >= count {
+		m.importSkillCursor = count - 1
+	}
+
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if limit > count {
+		limit = count
+	}
+
+	maxOffset := count - limit
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	if m.importSkillOffset < 0 {
+		m.importSkillOffset = 0
+	}
+	if m.importSkillOffset > maxOffset {
+		m.importSkillOffset = maxOffset
+	}
+
+	if m.importSkillCursor < m.importSkillOffset {
+		m.importSkillOffset = m.importSkillCursor
+	}
+	if m.importSkillCursor >= m.importSkillOffset+limit {
+		m.importSkillOffset = m.importSkillCursor - limit + 1
+	}
+}
+
+func (m Model) visibleImportAgentMatches() []importAgentOption {
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if len(m.importAgentMatches) == 0 {
+		return nil
+	}
+
+	start := m.importAgentOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.importAgentMatches) {
+		start = len(m.importAgentMatches)
+	}
+
+	end := start + limit
+	if end > len(m.importAgentMatches) {
+		end = len(m.importAgentMatches)
+	}
+
+	return m.importAgentMatches[start:end]
+}
+
+func (m Model) visibleImportSkillMatches() []importSkillMatch {
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if len(m.importSkillMatches) == 0 {
+		return nil
+	}
+
+	start := m.importSkillOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.importSkillMatches) {
+		start = len(m.importSkillMatches)
+	}
+
+	end := start + limit
+	if end > len(m.importSkillMatches) {
+		end = len(m.importSkillMatches)
+	}
+
+	return m.importSkillMatches[start:end]
+}
+
+func (m *Model) ensureManagedImportSource(sourcePath string) (config.Repository, bool, error) {
+	for _, repo := range m.cfg.Repositories {
+		if strings.EqualFold(repo.ID, managedImportSourceID) {
+			return repo, false, nil
+		}
+	}
+
+	repo := config.Repository{
+		ID:   managedImportSourceID,
+		Type: config.RepositoryTypeLocal,
+		Path: sourcePath,
+	}
+	m.cfg.Repositories = append(m.cfg.Repositories, repo)
+	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
+		return config.Repository{}, false, err
+	}
+	return repo, true, nil
+}
+
+func sanitizeImportDirName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.ReplaceAll(raw, string(filepath.Separator), "__")
+	raw = strings.ReplaceAll(raw, "/", "__")
+	raw = strings.ToLower(raw)
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source is not a directory: %s", src)
+	}
+
+	if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		fileInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dstPath, data, fileInfo.Mode().Perm()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (m *Model) applySkillPickerSelections() {
@@ -928,6 +1595,10 @@ func (m Model) computeViewportHeight() int {
 	}
 	if m.skillPickerOpen {
 		reserved += len(m.visibleSkillMatches()) + 3
+	} else if m.importAgentPickerOpen {
+		reserved += len(m.visibleImportAgentMatches()) + 3
+	} else if m.importSkillPickerOpen {
+		reserved += len(m.visibleImportSkillMatches()) + 3
 	} else if m.paletteOpen() {
 		reserved += min(len(m.visibleMatches()), m.maxDropdownItems()) + 2
 	}
@@ -987,6 +1658,161 @@ func (m Model) tinyLayout() bool {
 	return false
 }
 
+func (m Model) discoverImportAgents() []importAgentOption {
+	agentTargets := []struct {
+		id   string
+		name string
+		path string
+	}{
+		{id: "claude", name: "Claude", path: "~/.claude/skills"},
+		{id: "opencode", name: "OpenCode", path: "~/.config/opencode/skills"},
+		{id: "gemini", name: "Gemini", path: "~/.gemini/antigravity/skills"},
+		{id: "cursor", name: "Cursor", path: "~/.cursor/skills/antigravity-awesome-skills/skills"},
+		{id: "codex", name: "Codex", path: "~/.codex/skills"},
+		{id: "kiro", name: "Kiro", path: "~/.kiro/skills"},
+	}
+
+	managed := make(map[string]bool, len(m.cfg.SelectedSkills))
+	for _, skillID := range m.cfg.SelectedSkills {
+		installDir := strings.ToLower(config.SkillInstallDirName(skillID))
+		if installDir != "" {
+			managed[installDir] = true
+		}
+
+		leaf := selectedSkillLeafName(skillID)
+		if leaf != "" {
+			managed[strings.ToLower(leaf)] = true
+
+			sanitizedLeaf := strings.TrimPrefix(config.SkillInstallDirName("skill/"+leaf), "skill--")
+			if sanitizedLeaf != "" {
+				managed[strings.ToLower(sanitizedLeaf)] = true
+			}
+		}
+	}
+
+	agents := make([]importAgentOption, 0, len(agentTargets))
+	for _, agent := range agentTargets {
+		root := config.ExpandPath(agent.path)
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+
+		skills := discoverUnmanagedSkills(root, managed)
+		if len(skills) == 0 {
+			continue
+		}
+
+		agents = append(agents, importAgentOption{
+			ID:     agent.id,
+			Name:   agent.name,
+			Path:   root,
+			Skills: skills,
+		})
+	}
+
+	sort.SliceStable(agents, func(i, j int) bool {
+		return agents[i].Name < agents[j].Name
+	})
+	return agents
+}
+
+func discoverUnmanagedSkills(root string, managed map[string]bool) []importSkillCandidate {
+	candidates := make([]importSkillCandidate, 0)
+	seen := make(map[string]bool)
+
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		if rel == "." {
+			return nil
+		}
+		if hasHiddenSegment(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || d.Name() != "SKILL.md" {
+			return nil
+		}
+
+		skillDir := filepath.Dir(path)
+		skillRel, relSkillErr := filepath.Rel(root, skillDir)
+		if relSkillErr != nil {
+			return nil
+		}
+		topLevel := topLevelSegment(skillRel)
+		if topLevel == "" {
+			return nil
+		}
+		if managed[strings.ToLower(topLevel)] {
+			return nil
+		}
+
+		key := strings.ToLower(skillRel)
+		if seen[key] {
+			return nil
+		}
+		seen[key] = true
+
+		candidates = append(candidates, importSkillCandidate{
+			Key:      key,
+			Name:     filepath.Base(skillDir),
+			Source:   skillDir,
+			Relative: filepath.ToSlash(skillRel),
+		})
+		return nil
+	})
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Name != candidates[j].Name {
+			return candidates[i].Name < candidates[j].Name
+		}
+		return candidates[i].Relative < candidates[j].Relative
+	})
+
+	return candidates
+}
+
+func hasHiddenSegment(relPath string) bool {
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	for _, part := range parts {
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+func selectedSkillLeafName(skillID string) string {
+	skillID = strings.TrimSpace(skillID)
+	if skillID == "" {
+		return ""
+	}
+	if slash := strings.Index(skillID, "/"); slash >= 0 && slash+1 < len(skillID) {
+		return strings.TrimSpace(skillID[slash+1:])
+	}
+	return skillID
+}
+
+func topLevelSegment(relPath string) string {
+	relPath = strings.TrimSpace(filepath.ToSlash(relPath))
+	if relPath == "" {
+		return ""
+	}
+	parts := strings.Split(relPath, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
 func hasCommandPrefix(raw string) bool {
 	raw = strings.TrimLeft(raw, " ")
 	return strings.HasPrefix(raw, "/")
@@ -1017,6 +1843,14 @@ func (m *Model) refresh() {
 	m.availableIDs = config.SkillIDs(m.available)
 	if m.skillPickerOpen {
 		m.recomputeSkillMatches()
+		return
+	}
+	if m.importAgentPickerOpen {
+		m.recomputeImportAgentMatches()
+		return
+	}
+	if m.importSkillPickerOpen {
+		m.recomputeImportSkillMatches()
 		return
 	}
 	m.recomputeMatches()

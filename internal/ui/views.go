@@ -159,6 +159,10 @@ func (m Model) renderChatWorkspace() string {
 	parts = append(parts, inputRow)
 	if dropdown := m.renderSkillPickerDropdown(innerWidth); dropdown != "" {
 		parts = append(parts, dropdown)
+	} else if dropdown := m.renderImportAgentPickerDropdown(innerWidth); dropdown != "" {
+		parts = append(parts, dropdown)
+	} else if dropdown := m.renderImportSkillPickerDropdown(innerWidth); dropdown != "" {
+		parts = append(parts, dropdown)
 	} else if dropdown := m.renderCommandDropdown(innerWidth); dropdown != "" {
 		parts = append(parts, dropdown)
 	}
@@ -243,7 +247,7 @@ func (m Model) renderInputRow(width int) string {
 	)
 
 	value := strings.TrimSpace(m.commandInput.Value())
-	if !m.skillPickerOpen && value != "" && !hasCommandPrefix(value) {
+	if !m.anyPickerOpen() && value != "" && !hasCommandPrefix(value) {
 		line += invalidInputStyle.Render("  start with /")
 	}
 
@@ -395,11 +399,122 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	return dropdownStyle.Width(width).Render(content)
 }
 
+func (m Model) renderImportAgentPickerDropdown(width int) string {
+	if !m.importAgentPickerOpen {
+		return ""
+	}
+
+	visible := m.visibleImportAgentMatches()
+	displayCount := min(len(visible), m.maxDropdownItems())
+	lineWidth := width - 2
+	if lineWidth < 6 {
+		lineWidth = 6
+	}
+
+	query := strings.TrimSpace(m.commandInput.Value())
+	header := "Import: Agents"
+	if query != "" {
+		header = fmt.Sprintf("Import: %d agent match(es)", len(m.importAgentMatches))
+	}
+
+	lines := make([]string, 0, displayCount+3)
+	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
+
+	if displayCount == 0 {
+		lines = append(lines, warnStyle.Render(truncateASCII(" No matching agents.", lineWidth)))
+	} else {
+		for i := 0; i < displayCount; i++ {
+			agent := visible[i]
+			absoluteIndex := m.importAgentOffset + i
+			line := fmt.Sprintf(" %2d. %-12s (%d skill%s)", absoluteIndex+1, agent.Name, len(agent.Skills), pluralSuffix(len(agent.Skills)))
+			line = truncateASCII(line, lineWidth)
+			if absoluteIndex == m.importAgentCursor {
+				lines = append(lines, activeItemStyle.Render(line))
+			} else {
+				lines = append(lines, paletteItemStyle.Render(line))
+			}
+		}
+	}
+
+	lines = append(lines, usageStyle.Render(truncateASCII(" enter continue  esc cancel", lineWidth)))
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if m.tinyLayout() {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+	return dropdownStyle.Width(width).Render(content)
+}
+
+func (m Model) renderImportSkillPickerDropdown(width int) string {
+	if !m.importSkillPickerOpen {
+		return ""
+	}
+
+	visible := m.visibleImportSkillMatches()
+	displayCount := min(len(visible), m.maxDropdownItems())
+	lineWidth := width - 2
+	if lineWidth < 6 {
+		lineWidth = 6
+	}
+
+	query := strings.TrimSpace(m.commandInput.Value())
+	agentName := m.importAgentChosen.Name
+	if agentName == "" {
+		agentName = "agent"
+	}
+	header := fmt.Sprintf("Import: %s", agentName)
+	if query != "" {
+		header = fmt.Sprintf("Import: %d skill match(es)", len(m.importSkillMatches))
+	}
+
+	lines := make([]string, 0, displayCount+4)
+	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
+
+	if displayCount == 0 {
+		lines = append(lines, warnStyle.Render(truncateASCII(" No matching skills.", lineWidth)))
+	} else {
+		for i := 0; i < displayCount; i++ {
+			match := visible[i]
+			absoluteIndex := m.importSkillOffset + i
+			selected := m.importSkillSelections[strings.ToLower(match.Skill.Key)]
+
+			indicatorPlain := "[ ]"
+			indicatorStyled := checkboxEmptyStyle.Render(indicatorPlain)
+			if selected {
+				indicatorPlain = "[✓]"
+				indicatorStyled = checkboxSelectedStyle.Render(indicatorPlain)
+			}
+
+			prefixPlain := fmt.Sprintf(" %s %3d. ", indicatorPlain, absoluteIndex+1)
+			prefixStyled := fmt.Sprintf(" %s %3d. ", indicatorStyled, absoluteIndex+1)
+			name := truncateASCII(match.Skill.Name, max(8, lineWidth-len(prefixPlain)))
+			linePlain := truncateASCII(prefixPlain+name, lineWidth)
+			lineStyled := truncateASCII(prefixStyled+name, lineWidth)
+
+			if absoluteIndex == m.importSkillCursor {
+				lines = append(lines, activeItemStyle.Render(linePlain))
+			} else {
+				lines = append(lines, paletteItemStyle.Render(lineStyled))
+			}
+		}
+	}
+
+	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  enter import  esc cancel", lineWidth)))
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if m.tinyLayout() {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+	return dropdownStyle.Width(width).Render(content)
+}
+
 func (m Model) renderHelpBar(width int) string {
 	if m.tinyLayout() {
 		help := "/ commands  enter run  ctrl+c quit"
 		if m.skillPickerOpen {
 			help = "up/down move  space toggle  enter confirm"
+		} else if m.importAgentPickerOpen {
+			help = "up/down move  enter select  esc cancel"
+		} else if m.importSkillPickerOpen {
+			help = "up/down move  space toggle  enter import"
 		} else if m.paletteOpen() {
 			help = "up/down select  tab fill  enter run"
 		}
@@ -409,6 +524,10 @@ func (m Model) renderHelpBar(width int) string {
 	help := "type / for commands  up/down history  pgup/pgdn scroll  ctrl+c quit"
 	if m.skillPickerOpen {
 		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
+	} else if m.importAgentPickerOpen {
+		help = "type to search  up/down navigate  enter continue  esc cancel"
+	} else if m.importSkillPickerOpen {
+		help = "type to search  up/down navigate  space toggle  enter import  esc cancel"
 	} else if m.paletteOpen() {
 		help = "up/down select  tab autocomplete  enter run  esc reset  ctrl+c quit"
 	}
@@ -592,4 +711,11 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
