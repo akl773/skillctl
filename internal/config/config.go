@@ -90,7 +90,7 @@ func DefaultConfig() Config {
 			"~/.claude/skills",
 			"~/.config/opencode/skills",
 			"~/.gemini/antigravity/skills",
-			"~/.cursor/skills/antigravity-awesome-skills/skills",
+			"~/.cursor/skills",
 			"~/.codex/skills",
 			"~/.kiro/skills",
 		},

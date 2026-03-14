@@ -1667,7 +1667,7 @@ func (m Model) discoverImportAgents() []importAgentOption {
 		{id: "claude", name: "Claude", path: "~/.claude/skills"},
 		{id: "opencode", name: "OpenCode", path: "~/.config/opencode/skills"},
 		{id: "gemini", name: "Gemini", path: "~/.gemini/antigravity/skills"},
-		{id: "cursor", name: "Cursor", path: "~/.cursor/skills/antigravity-awesome-skills/skills"},
+		{id: "cursor", name: "Cursor", path: "~/.cursor/skills"},
 		{id: "codex", name: "Codex", path: "~/.codex/skills"},
 		{id: "kiro", name: "Kiro", path: "~/.kiro/skills"},
 	}
