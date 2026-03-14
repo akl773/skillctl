@@ -18,7 +18,7 @@ func (m *Model) actionGitPull() commandResult {
 		return commandResult{Output: warnStyle.Render("An upstream sync is already running.")}
 	}
 	if len(m.cfg.Repositories) == 0 {
-		return commandResult{Output: warnStyle.Render("No repositories configured. Add one with /add (or /repo add <url>).")}
+		return commandResult{Output: warnStyle.Render("No repositories configured. Add one with /add <url>.")}
 	}
 
 	m.gitPullRunning = true
@@ -455,7 +455,13 @@ func (m *Model) actionStatus() string {
 	for _, repo := range m.cfg.Repositories {
 		localPath := m.paths.RepoPath(repo.ID)
 		status := warnStyle.Render("missing")
-		if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+		if repo.SourceType() == config.RepositoryTypeLocal {
+			localPath = config.ExpandPath(repo.Path)
+			status = warnStyle.Render("unavailable")
+			if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+				status = successStyle.Render("ready")
+			}
+		} else if info, err := os.Stat(localPath); err == nil && info.IsDir() {
 			status = successStyle.Render("cloned")
 		}
 		sb.WriteString(fmt.Sprintf("- %s: %s\n", repo.ID, status))
@@ -516,21 +522,28 @@ func (m *Model) actionListRepos() string {
 	var sb strings.Builder
 	sb.WriteString(infoStyle.Render("Repositories") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(fmt.Sprintf("%-4s %-26s %-18s %s\n", "#", "ID", "Local", "URL"))
+	sb.WriteString(fmt.Sprintf("%-4s %-26s %-18s %s\n", "#", "ID", "Status", "Source"))
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
 
 	for i, repo := range m.cfg.Repositories {
 		localPath := m.paths.RepoPath(repo.ID)
 		status := errorStyle.Render("missing")
-		if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+		source := repo.URL
+		if repo.SourceType() == config.RepositoryTypeLocal {
+			localPath = config.ExpandPath(repo.Path)
+			source = config.CompactPath(localPath)
+			if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+				status = successStyle.Render("local")
+			}
+		} else if info, err := os.Stat(localPath); err == nil && info.IsDir() {
 			status = successStyle.Render("cloned")
 		}
 
-		sb.WriteString(fmt.Sprintf("%-4d %-26s %-18s %s\n", i+1, repo.ID, status, repo.URL))
+		sb.WriteString(fmt.Sprintf("%-4d %-26s %-18s %s\n", i+1, repo.ID, status, source))
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(mutedStyle.Render("Use /add (or /repo add <url>) and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to sync upstream sources now."))
+	sb.WriteString(mutedStyle.Render("Use /add <url> and /repo remove <index|id|url>. Repositories auto-update on launch; run /pull to sync upstream sources now."))
 	return sb.String()
 }
 
@@ -639,7 +652,11 @@ func (m *Model) actionRemoveRepo(raw string) string {
 	}
 
 	removeOutcome := core.RemoveSelectedSkills(&m.cfg, removedSelected)
-	_ = os.RemoveAll(m.paths.RepoPath(repo.ID))
+	if repo.SourceType() == config.RepositoryTypeLocal {
+		_ = os.RemoveAll(config.ExpandPath(repo.Path))
+	} else {
+		_ = os.RemoveAll(m.paths.RepoPath(repo.ID))
+	}
 
 	if err := config.SaveConfig(m.paths, m.cfg); err != nil {
 		return errorStyle.Render("Failed to save config: " + err.Error())

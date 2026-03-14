@@ -127,6 +127,21 @@ func RunGitPullStream(
 		go func() {
 			defer wg.Done()
 
+			if repo.SourceType() != config.RepositoryTypeGit {
+				localPath := config.ExpandPath(repo.Path)
+				if onStdout != nil {
+					onStdout(fmt.Sprintf("\n[%s] SKIP (local source)\n", repo.ID))
+				}
+				outcome.Results[i] = RepoPullResult{
+					RepoID:       repo.ID,
+					RepoURL:      repo.URL,
+					Action:       "skip",
+					ReturnCode:   0,
+					LocalRepoDir: localPath,
+				}
+				return
+			}
+
 			repoPath := paths.RepoPath(repo.ID)
 			action := "pull"
 
