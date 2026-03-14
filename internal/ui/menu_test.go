@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -260,4 +262,94 @@ func TestRepoURLPromptEscapeCancelsPrompt(t *testing.T) {
 	assert.Equal(t, defaultInputPlaceholder, updated.commandInput.Placeholder)
 	assert.Equal(t, "", updated.commandInput.Value())
 	assert.Len(t, updated.cfg.Repositories, initialRepoCount)
+}
+
+func TestImportAgentPickerEnterOpensSkillPicker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claudeSkillDir := filepath.Join(home, ".claude", "skills", "my-import")
+	require.NoError(t, os.MkdirAll(claudeSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte("# skill"), 0o644))
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.enterImportAgentPicker()
+	require.True(t, m.importAgentPickerOpen)
+
+	updatedModel, _ := m.handleImportAgentPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := updatedModel.(Model)
+
+	assert.False(t, updated.importAgentPickerOpen)
+	assert.True(t, updated.importSkillPickerOpen)
+	require.NotEmpty(t, updated.importSkillMatches)
+}
+
+func TestImportSkillPickerApplyImportsIntoManagedSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claudeSkillDir := filepath.Join(home, ".claude", "skills", "my-import")
+	require.NoError(t, os.MkdirAll(claudeSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte("# skill"), 0o644))
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.cfg.Targets = []string{filepath.Join(t.TempDir(), "targets")}
+	require.NoError(t, os.MkdirAll(config.ExpandPath(m.cfg.Targets[0]), 0o755))
+	_ = config.SaveConfig(paths, m.cfg)
+
+	m.enterImportAgentPicker()
+	require.True(t, m.importAgentPickerOpen)
+	m.enterImportSkillPicker()
+	require.True(t, m.importSkillPickerOpen)
+	require.NotEmpty(t, m.importSkillMatches)
+
+	m.toggleImportSkillSelection()
+	m.applyImportSkillSelections()
+
+	assert.False(t, m.importSkillPickerOpen)
+	assert.Contains(t, m.outputContent, "Added:")
+	assert.Contains(t, m.outputContent, managedImportSourceID+"/")
+
+	managedPath := filepath.Join(paths.LocalDir, "imported-skills")
+	assert.DirExists(t, managedPath)
+	entries, err := os.ReadDir(managedPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	assert.FileExists(t, filepath.Join(managedPath, entries[0].Name(), "SKILL.md"))
+}
+
+func TestDiscoverImportAgentsExcludesSkillctlManagedSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, ".claude", "skills")
+
+	managedTop := "sickn33-antigravity-awesome-skills--code-reviewer"
+	require.NoError(t, os.MkdirAll(filepath.Join(root, managedTop), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, managedTop, "SKILL.md"), []byte("# managed"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, managedTop, "nested"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, managedTop, "nested", "SKILL.md"), []byte("# nested"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "code-reviewer"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "code-reviewer", "SKILL.md"), []byte("# legacy"), 0o644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "custom-unmanaged"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "custom-unmanaged", "SKILL.md"), []byte("# unmanaged"), 0o644))
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.cfg.SelectedSkills = []string{"sickn33-antigravity-awesome-skills/code-reviewer"}
+
+	agents := m.discoverImportAgents()
+	require.Len(t, agents, 1)
+	assert.Equal(t, "claude", agents[0].ID)
+
+	relatives := make([]string, 0, len(agents[0].Skills))
+	for _, skill := range agents[0].Skills {
+		relatives = append(relatives, skill.Relative)
+	}
+
+	assert.Contains(t, relatives, "custom-unmanaged")
+	assert.NotContains(t, relatives, managedTop)
+	assert.NotContains(t, relatives, managedTop+"/nested")
+	assert.NotContains(t, relatives, "code-reviewer")
 }

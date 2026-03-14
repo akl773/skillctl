@@ -78,7 +78,7 @@ func builtInCommands() []commandDef {
 		},
 		{
 			Name:        "add",
-			Aliases:     []string{"repo add"},
+			Aliases:     nil,
 			Description: "Add one source repository (repo-only)",
 			Usage:       "/add [github-url]",
 			Examples:    []string{"/add", "/add https://github.com/org/repo", "/add git@github.com:org/repo.git"},
@@ -89,6 +89,21 @@ func builtInCommands() []commandDef {
 					return commandResult{KeepInput: true}
 				}
 				return m.actionAddRepo(args)
+			},
+		},
+		{
+			Name:        "import",
+			Aliases:     nil,
+			Description: "Import unmanaged local skills into managed source",
+			Usage:       "/import",
+			Examples:    []string{"/import"},
+			Run: func(m *Model, args string) commandResult {
+				args = strings.TrimSpace(args)
+				if args != "" {
+					return commandResult{Output: errorStyle.Render("Usage: /import")}
+				}
+				m.enterImportAgentPicker()
+				return commandResult{KeepInput: true}
 			},
 		},
 		{

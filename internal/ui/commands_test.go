@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"akhilsingh.in/skillctl/internal/config"
@@ -164,11 +166,6 @@ func TestResolveBuiltInRepoCommands(t *testing.T) {
 	assert.Equal(t, "add", cmd.Name)
 	assert.Equal(t, "https://github.com/foo/bar", args)
 
-	cmd, args, ok = resolveCommand(commands, "/repo add https://github.com/foo/bar")
-	require.True(t, ok)
-	assert.Equal(t, "add", cmd.Name)
-	assert.Equal(t, "https://github.com/foo/bar", args)
-
 	cmd, args, ok = resolveCommand(commands, "/repo remove vercel-labs-agent-skills")
 	require.True(t, ok)
 	assert.Equal(t, "repo remove", cmd.Name)
@@ -178,6 +175,18 @@ func TestResolveBuiltInRepoCommands(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "repos", cmd.Name)
 	assert.Equal(t, "", args)
+}
+
+func TestResolveBuiltInImportCommand(t *testing.T) {
+	commands := builtInCommands()
+
+	cmd, args, ok := resolveCommand(commands, "/import")
+	require.True(t, ok)
+	assert.Equal(t, "import", cmd.Name)
+	assert.Equal(t, "", args)
+
+	_, _, ok = resolveCommand(commands, "/repo import")
+	assert.False(t, ok)
 }
 
 func TestResolveBuiltInSkillsAliasRunsToggleAction(t *testing.T) {
@@ -236,6 +245,29 @@ func TestAddCommandWithURLStartsImmediateSyncStream(t *testing.T) {
 	assert.Contains(t, result.Output, "Syncing upstream skill source")
 	assert.True(t, m.gitPullRunning)
 	assert.False(t, m.gitPullSilent)
+}
+
+func TestImportCommandWithoutArgsEntersAgentPicker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claudeSkillDir := filepath.Join(home, ".claude", "skills", "custom-import-skill")
+	require.NoError(t, os.MkdirAll(claudeSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte("# skill"), 0o644))
+
+	commands := builtInCommands()
+	cmd, args, ok := resolveCommand(commands, "/import")
+	require.True(t, ok)
+	assert.Equal(t, "import", cmd.Name)
+	assert.Equal(t, "", args)
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+
+	result := cmd.Run(&m, args)
+	assert.True(t, result.KeepInput)
+	assert.True(t, m.importAgentPickerOpen)
+	assert.Equal(t, importAgentPlaceholder, m.commandInput.Placeholder)
+	require.NotEmpty(t, m.importAgentOptions)
 }
 
 func testCommandDefs() []commandDef {
