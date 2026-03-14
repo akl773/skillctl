@@ -106,6 +106,7 @@ func TestLoadAndSaveConfig(t *testing.T) {
 		paths := ResolvePaths(workspace)
 		require.NoError(t, os.MkdirAll(paths.LocalDir, 0o755))
 
+		localSource := filepath.Join(workspace, "imports")
 		raw := Config{
 			SelectedSkills: []string{" alpha ", "beta", "alpha", " ", "Gamma"},
 			DisabledSkills: []string{"beta", "BETA", "gamma", "missing"},
@@ -114,6 +115,7 @@ func TestLoadAndSaveConfig(t *testing.T) {
 				{URL: "https://github.com/vercel-labs/agent-skills"},
 				{URL: "git@github.com:vercel-labs/agent-skills.git"},
 				{ID: "Custom_ID", URL: "github.com/callstackincubator/agent-skills"},
+				{ID: "Skillctl Imported", Type: RepositoryTypeLocal, Path: localSource},
 				{URL: "bad/repo/format/extra"},
 			},
 		}
@@ -123,11 +125,14 @@ func TestLoadAndSaveConfig(t *testing.T) {
 		assert.Equal(t, []string{"alpha", "beta", "Gamma"}, cfg.SelectedSkills)
 		assert.Equal(t, []string{"beta", "Gamma"}, cfg.DisabledSkills)
 		assert.Equal(t, []string{"~/one", "~/two"}, cfg.Targets)
-		require.Len(t, cfg.Repositories, len(DefaultRepositories()))
+		require.Len(t, cfg.Repositories, len(DefaultRepositories())+1)
 		assert.Equal(t, "vercel-labs-agent-skills", cfg.Repositories[0].ID)
 		assert.Equal(t, "https://github.com/vercel-labs/agent-skills.git", cfg.Repositories[0].URL)
 		assert.Equal(t, "custom-id", cfg.Repositories[1].ID)
 		assert.Equal(t, "https://github.com/callstackincubator/agent-skills.git", cfg.Repositories[1].URL)
+		assert.Equal(t, "skillctl-imported", cfg.Repositories[2].ID)
+		assert.Equal(t, RepositoryTypeLocal, cfg.Repositories[2].Type)
+		assert.Equal(t, ExpandPath(localSource), cfg.Repositories[2].Path)
 	})
 
 	t.Run("save and load round trip", func(t *testing.T) {
@@ -247,14 +252,23 @@ func TestLoadAvailableSkills(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(paths.RepoPath(repoB.ID), "pkg", "gamma"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(paths.RepoPath(repoB.ID), "pkg", "gamma", "SKILL.md"), []byte("gamma"), 0o644))
 
-	cfg := Config{Repositories: []Repository{repoA, repoB}}
+	localSource := filepath.Join(workspace, "imports")
+	require.NoError(t, os.MkdirAll(filepath.Join(localSource, "delta"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(localSource, "delta", "SKILL.md"), []byte("delta"), 0o644))
+
+	cfg := Config{Repositories: []Repository{repoA, repoB, {
+		ID:   "skillctl-imported",
+		Type: RepositoryTypeLocal,
+		Path: localSource,
+	}}}
 	skills := LoadAvailableSkills(paths, cfg)
 	ids := SkillIDs(skills)
 
-	assert.Len(t, ids, 4)
+	assert.Len(t, ids, 5)
 	assert.Contains(t, ids, repoA.ID+"/alpha")
 	assert.Contains(t, ids, repoA.ID+"/beta")
 	assert.Contains(t, ids, repoB.ID+"/gamma")
+	assert.Contains(t, ids, "skillctl-imported/delta")
 
 	var duplicateID string
 	for _, id := range ids {

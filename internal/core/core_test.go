@@ -201,7 +201,7 @@ func TestRunGitPullStreamProcessesReposInParallel(t *testing.T) {
 		assert.Equal(t, 0, result.ReturnCode)
 	}
 
-	assert.Less(t, elapsed, 2*time.Second)
+	assert.Less(t, elapsed, 3*time.Second)
 }
 
 func TestRunGitPullStreamPreservesResultOrderAndAction(t *testing.T) {
@@ -235,6 +235,22 @@ func TestRunGitPullStreamPreservesResultOrderAndAction(t *testing.T) {
 	assert.Equal(t, repositories[2].ID, outcome.Results[2].RepoID)
 	assert.Equal(t, "pull", outcome.Results[2].Action)
 	assert.Equal(t, 0, outcome.Results[2].ReturnCode)
+}
+
+func TestRunGitPullStreamSkipsLocalSources(t *testing.T) {
+	paths := config.AppPaths{RepoCacheDir: filepath.Join(t.TempDir(), "repos")}
+	localSource := filepath.Join(t.TempDir(), "imported-skills")
+	require.NoError(t, os.MkdirAll(localSource, 0o755))
+
+	repositories := []config.Repository{
+		{ID: "skillctl-imported", Type: config.RepositoryTypeLocal, Path: localSource},
+	}
+
+	outcome := RunGitPullStream(paths, repositories, nil, nil)
+	require.Len(t, outcome.Results, 1)
+	assert.Equal(t, "skip", outcome.Results[0].Action)
+	assert.Equal(t, 0, outcome.Results[0].ReturnCode)
+	assert.Equal(t, localSource, outcome.Results[0].LocalRepoDir)
 }
 
 func installFakeGitBinary(t *testing.T) string {

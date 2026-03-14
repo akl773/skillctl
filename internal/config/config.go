@@ -39,8 +39,23 @@ func (p AppPaths) RepoPath(repoID string) string {
 
 // Repository identifies an upstream git repository that contains skills.
 type Repository struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID   string `json:"id"`
+	URL  string `json:"url,omitempty"`
+	Type string `json:"type,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+const (
+	RepositoryTypeGit   = "git"
+	RepositoryTypeLocal = "local"
+)
+
+func (r Repository) SourceType() string {
+	t := strings.ToLower(strings.TrimSpace(r.Type))
+	if t == RepositoryTypeLocal {
+		return RepositoryTypeLocal
+	}
+	return RepositoryTypeGit
 }
 
 // Config holds user-selected skills, targets, and configured repositories.
@@ -213,6 +228,9 @@ func LoadAvailableSkills(paths AppPaths, cfg Config) []AvailableSkill {
 
 	for _, repo := range cfg.Repositories {
 		repoPath := paths.RepoPath(repo.ID)
+		if repo.SourceType() == RepositoryTypeLocal {
+			repoPath = ExpandPath(repo.Path)
+		}
 		if info, err := os.Stat(repoPath); err != nil || !info.IsDir() {
 			continue
 		}
@@ -464,30 +482,60 @@ func normalizeRepositories(repos []Repository) []Repository {
 	seenURLs := make(map[string]bool)
 
 	for _, repo := range repos {
-		normalized, err := NormalizeRepository(repo.URL)
-		if err != nil {
+		normalized, ok := normalizeRepositoryEntry(repo)
+		if !ok {
 			continue
 		}
 
-		if repo.ID != "" {
-			normalized.ID = sanitizeRepoID(strings.ToLower(strings.TrimSpace(repo.ID)))
-		}
-		if normalized.ID == "" {
+		idKey := strings.ToLower(normalized.ID)
+		if seenIDs[idKey] {
 			continue
 		}
 
 		urlKey := strings.ToLower(normalized.URL)
-		idKey := strings.ToLower(normalized.ID)
-		if seenURLs[urlKey] || seenIDs[idKey] {
-			continue
+		if normalized.SourceType() == RepositoryTypeGit && urlKey != "" {
+			if seenURLs[urlKey] {
+				continue
+			}
+			seenURLs[urlKey] = true
 		}
 
-		seenURLs[urlKey] = true
 		seenIDs[idKey] = true
 		out = append(out, normalized)
 	}
 
 	return out
+}
+
+func normalizeRepositoryEntry(repo Repository) (Repository, bool) {
+	if repo.SourceType() == RepositoryTypeLocal {
+		id := sanitizeRepoID(strings.ToLower(strings.TrimSpace(repo.ID)))
+		if id == "" {
+			return Repository{}, false
+		}
+		path := strings.TrimSpace(repo.Path)
+		if path == "" {
+			return Repository{}, false
+		}
+		return Repository{
+			ID:   id,
+			Type: RepositoryTypeLocal,
+			Path: ExpandPath(path),
+		}, true
+	}
+
+	normalized, err := NormalizeRepository(repo.URL)
+	if err != nil {
+		return Repository{}, false
+	}
+
+	if repo.ID != "" {
+		normalized.ID = sanitizeRepoID(strings.ToLower(strings.TrimSpace(repo.ID)))
+	}
+	if normalized.ID == "" {
+		return Repository{}, false
+	}
+	return normalized, true
 }
 
 func normalizeRepoIDs(ids []string) []string {
