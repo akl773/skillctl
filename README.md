@@ -1,131 +1,209 @@
 # skillctl
 
-An interactive TUI for managing and syncing AI skills from multiple GitHub repositories into local agent folders.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go](https://img.shields.io/badge/Go-1.25.8-blue.svg)](https://go.dev/)
+[![CI](https://github.com/akl773/skillctl/actions/workflows/ci.yml/badge.svg)](https://github.com/akl773/skillctl/actions/workflows/ci.yml)
 
-`skillctl` keeps your Claude, Gemini, Cursor, Codex, Kiro, OpenCode, and other agent skill directories up to date from one place.
+> skillctl is a terminal application that helps AI agent users aggregate, select, and sync skills from multiple sources into local agent directories using a keyboard-driven TUI.
 
-## Install
+[Report an Issue](https://github.com/akl773/skillctl/issues)
 
-### Homebrew (recommended)
+## Overview
 
-```bash
-brew install akl773/skillctl/skillctl
+`skillctl` centralizes skill management across tools like Claude, Gemini, Cursor, Codex, OpenCode, and Kiro. It discovers skills from configured repositories, lets you select what you need, and syncs those selections to one or more target folders.
+
+The interface is a keyboard-driven Bubble Tea TUI designed for fast local operations, minimizing the friction of manual skill management.
+
+## Why It Exists
+
+Managing skills manually across multiple agents and repositories is repetitive, error-prone, and hard to keep consistent. `skillctl` provides one place to manage source repositories, selected skills, and target locations while handling clone/pull and sync operations for you.
+
+## Core Capabilities
+
+- **Multi-repository catalog discovery**: Recursive `SKILL.md` scanning across all sources.
+- **Collision-safe IDs**: Namespaced skill IDs (`<repo-id>/<skill-name>`) prevent overlaps.
+- **Multi-target sync**: Synchronize selected skills to all agent directories in a single command.
+- **Repository management**: Add, remove, and update source repositories (`/repos`, `/add`, `/pull`).
+- **Target management**: Easily configure agent-specific destination folders (`/targets`).
+- **Local import flow**: Import unmanaged skills into your managed source system.
+- **Background updates**: Repositories are updated on app launch to keep your catalog fresh.
+
+## Tech Stack
+
+- **Language**: [Go](https://go.dev/) 1.25.8
+- **TUI**: [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lip Gloss](https://github.com/charmbracelet/lipgloss)
+- **Testing**: Go `testing` + [Testify](https://github.com/stretchr/testify)
+- **Tooling**: Make, [GoReleaser](https://goreleaser.com/), GitHub Actions
+- **Dependencies**: `git`, `rsync`
+
+## Architecture
+
+`skillctl` uses a layered design separating UI orchestration, domain logic, and configuration management.
+
+```mermaid
+flowchart LR
+    U[User in TUI] --> UI[Bubble Tea UI]
+    UI --> CFG[Config layer]
+    UI --> CORE[Core sync logic]
+    CFG --> JSON[skillctl.json & state.json]
+    CORE --> GIT[git clone / pull]
+    CORE --> RSYNC[rsync operations]
+    GIT --> CACHE[Repo cache]
+    CACHE --> DISCOVER[SKILL.md Discovery]
+    DISCOVER --> CORE
+    CORE --> TARGETS[Agent target folders]
 ```
 
-### From source
+For deeper details, see [ARCHITECTURE.md](file:///Users/akhilsingh/Cursor/skillctl/docs/ARCHITECTURE.md).
 
+## Project Structure
+
+- `cmd/skillctl/` — CLI entrypoint and main application logic.
+- `internal/config/` — Path handling, configuration persistence, and skill discovery.
+- `internal/core/` — Git operations, selection logic, sync, and cleanup.
+- `internal/ui/` — Bubble Tea models, views, and slash command handlers.
+- `docs/` — Manuals and architectural documentation.
+- `scripts/` — Automation scripts for releases and packaging.
+
+## Getting Started
+
+### Prerequisites
+- **Go 1.25+** (for source builds)
+- **git**
+- **rsync**
+
+### Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/akl773/skillctl.git
+   cd skillctl
+   ```
+
+2. **Build and install**:
+   ```bash
+   make install
+   ```
+
+3. **Homebrew (Recommended)**:
+   ```bash
+   brew install akl773/skillctl/skillctl
+   ```
+
+### Quick Start
+Set an optional workspace location and launch:
 ```bash
-git clone https://github.com/akl773/skillctl.git
-cd skillctl
-make install
-```
-
-> Requires Go 1.25+
-
-## Prerequisites
-
-- [`git`](https://git-scm.com/) — for cloning and updating source repositories
-- [`rsync`](https://rsync.samba.org/) — for syncing skills to target directories (pre-installed on macOS and most Linux distros)
-
-## Usage
-
-```bash
-# Launch the interactive menu
+export SKILLCTL_WORKSPACE="$HOME/.skillctl"
 skillctl
-
-# Use a custom workspace
-skillctl --workspace /path/to/skillctl-workspace
-
-# Print version
-skillctl --version
 ```
 
-## Default Source Repositories
+## Configuration
 
-These repositories are included out of the box:
+### Environment Variables
 
-- `https://github.com/vercel-labs/agent-skills.git`
-- `https://github.com/callstackincubator/agent-skills.git`
-- `https://github.com/tech-leads-club/agent-skills.git`
-- `https://github.com/ComposioHQ/awesome-claude-skills.git`
-- `https://github.com/sickn33/antigravity-awesome-skills.git`
+| Variable | Required | Description | Default |
+|----------|----------|-------------|---------|
+| `SKILLCTL_WORKSPACE` | No | Overrides default workspace directory | `~/.skillctl` |
 
-You can add and remove repositories at runtime via `/repo add` and `/repo remove`.
+### Default Agent Targets
 
-## How It Works
-
-1. `skillctl` stores its workspace at `~/.skillctl` by default (override via `--workspace` or `$SKILLCTL_WORKSPACE`).
-2. Repository definitions and selections are stored in `~/.skillctl/.local/skillctl.json`.
-3. On launch, `skillctl` automatically clones or updates each configured repository in the background into `~/.skillctl/.local/repos/<repo-id>`.
-4. `/pull` is still available if you want to force a manual refresh across all repositories.
-5. `skillctl` recursively discovers skills by finding `SKILL.md` files in those local clones.
-6. Skills are selected using namespaced IDs: `<repo-id>/<skill-name>`.
-7. `/sync` rsyncs selected skills to each configured target.
-
-To prevent cross-repo collisions, target directory names use a namespaced layout:
-
-- skill ID: `vercel-labs-agent-skills/react-best-practices`
-- installed folder: `vercel-labs-agent-skills--react-best-practices`
-
-## Default Targets
-
-| Agent | Target path |
-|-------|------------|
+| Agent | Default Path |
+|-------|--------------|
 | Claude | `~/.claude/skills` |
-| OpenCode | `~/.config/opencode/skills` |
 | Gemini | `~/.gemini/antigravity/skills` |
 | Cursor | `~/.cursor/skills/antigravity-awesome-skills/skills` |
+| OpenCode | `~/.config/opencode/skills` |
 | Codex | `~/.codex/skills` |
 | Kiro | `~/.kiro/skills` |
 
-Targets can be added or removed from within the TUI at any time.
+## Running the Project
 
-## Common Workflow
-
-1. `/repos` to inspect configured repositories
-2. `/add` and then enter a GitHub repository URL to add a new source repository
-3. `/add` starts syncing the newly added repository immediately (streamed in the UI)
-4. `/search <query>` to find skills
-5. `/skills` to toggle skills via picker, ID, or catalog number
-6. `/sync` to deploy selected skills to all targets
-
-## Features
-
-- **Interactive TUI** — keyboard-driven terminal UI with search and navigation
-- **Multi-repo catalog** — aggregate skills from many repositories
-- **Namespaced skill IDs** — avoid collisions across repositories
-- **Multi-target sync** — rsync selected skills to all configured agent folders at once
-- **Repository management** — add/remove/list repositories on the fly
-- **Auto background updates** — repositories sync automatically on app launch
-- **Git integration** — `/add` immediately syncs the new repository; run `/pull` anytime to refresh all repositories
-
-## Development
-
+For local development and testing:
 ```bash
-make build    # Build binary (injects version from git tag)
-make run      # Build and run
-make clean    # Remove binary
-make install  # Install to $GOPATH/bin
-make test     # Run unit tests
-make cover    # Run tests with coverage summary
+make run
 ```
 
-## Architecture and Testing
+To view version or use a custom workspace via flag:
+```bash
+skillctl --version
+skillctl --workspace /custom/path
+```
 
-- Architecture guide: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Unit tests follow table-driven Go style with `testify/assert` and `testify/require`.
-- Priority coverage targets are `internal/config`, `internal/core`, and command parsing in `internal/ui`.
+## Usage
 
-## Releasing
-
-Releases are automated via [GoReleaser](https://goreleaser.com/) and GitHub Actions.
-Push a version tag to trigger a release:
+Interactive slash commands drive the application:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+/repos                      # List all source repositories
+/add [url]                  # Add a new GitHub skills repo
+/search [query]             # Find skills by name or description
+/skills [index,...]         # Toggle skill selection (e.g., /skills 1,4)
+/sync                       # Apply selections to all agent targets
+/status                     # View workspace health and summary
+/help                       # Show available commands
 ```
+
+## API / Interface Summary
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--workspace` | Sets the workspace directory |
+| `--version` | Prints version and exits |
+
+### Primary Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/pull` | Sync all configured upstream repositories |
+| `/repo remove <id>` | Remove a repository source |
+| `/target add <path>`| Add a new sync target |
+| `/target remove <id>`| Remove a sync target |
+| `/import` | Import unmanaged skills into local workspace |
+| `/quit` | Exit the application |
+
+## Development Workflow
+
+Standard Go development tasks are mapped to `Makefile` targets:
+
+```bash
+make build   # Build binary to ./skillctl
+make test    # Run all unit tests
+make cover   # View test coverage report
+```
+
+Continuous Integration runs `go vet`, `govulncheck`, and the test suite on every push.
+
+## Deployment
+
+Releases are automated via GitHub Actions and GoReleaser.
+
+To release a new version:
+1. Tag the release: `git tag v1.2.3`
+2. Push tags: `git push origin v1.2.3`
+
+This triggers the build pipeline, publishes binaries, and updates the Homebrew formula.
+
+## Documentation Map
+
+- [Architecture Overview](file:///Users/akhilsingh/Cursor/skillctl/docs/ARCHITECTURE.md)
+- [CI Pipeline Definitions](file:///Users/akhilsingh/Cursor/skillctl/.github/workflows/ci.yml)
+- [Release Workflow](file:///Users/akhilsingh/Cursor/skillctl/.github/workflows/release.yml)
+
+## Roadmap
+
+- [ ] Improve integration-testability for external command execution.
+- [ ] Expand automated coverage for interactive command paths.
+
+## Contributing
+
+1. Fork and clone the repository.
+2. Create a focused branch for your change.
+3. Implement changes with accompanying tests.
+4. Run `make test` and `go vet ./...` locally.
+5. Open a pull request with a detailed description.
 
 ## License
 
-MIT
+[MIT](https://opensource.org/licenses/MIT) © 2026 Akhil Singh
