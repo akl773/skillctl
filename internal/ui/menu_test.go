@@ -353,3 +353,34 @@ func TestDiscoverImportAgentsExcludesSkillctlManagedSkills(t *testing.T) {
 	assert.NotContains(t, relatives, managedTop+"/nested")
 	assert.NotContains(t, relatives, "code-reviewer")
 }
+
+func TestDiscoverImportAgentsFindsCursorSkillsInDefaultRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cursorSkillDir := filepath.Join(home, ".cursor", "skills", "custom-cursor")
+	require.NoError(t, os.MkdirAll(cursorSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cursorSkillDir, "SKILL.md"), []byte("# cursor"), 0o644))
+
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+
+	agents := m.discoverImportAgents()
+	require.NotEmpty(t, agents)
+
+	var cursor *importAgentOption
+	for i := range agents {
+		if agents[i].ID == "cursor" {
+			cursor = &agents[i]
+			break
+		}
+	}
+	require.NotNil(t, cursor)
+	require.NotEmpty(t, cursor.Skills)
+
+	relatives := make([]string, 0, len(cursor.Skills))
+	for _, skill := range cursor.Skills {
+		relatives = append(relatives, skill.Relative)
+	}
+	assert.Contains(t, relatives, "custom-cursor")
+}

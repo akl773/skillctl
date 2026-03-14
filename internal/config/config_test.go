@@ -17,6 +17,8 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Empty(t, cfg.SelectedSkills)
 	assert.Empty(t, cfg.DisabledSkills)
 	assert.NotEmpty(t, cfg.Targets)
+	assert.Contains(t, cfg.Targets, "~/.cursor/skills")
+	assert.NotContains(t, cfg.Targets, "~/.cursor/skills/antigravity-awesome-skills/skills")
 	assert.GreaterOrEqual(t, len(cfg.Repositories), 5)
 
 	repoIDs := make([]string, 0, len(cfg.Repositories))

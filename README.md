@@ -111,7 +111,7 @@ skillctl
 |-------|--------------|
 | Claude | `~/.claude/skills` |
 | Gemini | `~/.gemini/antigravity/skills` |
-| Cursor | `~/.cursor/skills/antigravity-awesome-skills/skills` |
+| Cursor | `~/.cursor/skills` |
 | OpenCode | `~/.config/opencode/skills` |
 | Codex | `~/.codex/skills` |
 | Kiro | `~/.kiro/skills` |
