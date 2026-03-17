@@ -52,6 +52,63 @@ func TestMatchAvailableSkills(t *testing.T) {
 		require.NotEmpty(t, matches)
 		assert.Equal(t, "repo/react-best-practices", matches[0].Skill.ID)
 	})
+
+	t.Run("separator-insensitive normalized prefix and equality", func(t *testing.T) {
+		testModel := Model{
+			available: []config.AvailableSkill{
+				{ID: "design/ui-ux", Name: "UI-UX", RepoID: "design"},
+				{ID: "design/ui-upgrade", Name: "UI Upgrade", RepoID: "design"},
+			},
+		}
+
+		matches := testModel.matchAvailableSkills("ui ux")
+		require.NotEmpty(t, matches)
+		assert.Equal(t, "design/ui-ux", matches[0].Skill.ID)
+	})
+
+	t.Run("prefix ranks ahead of fuzzy fallback", func(t *testing.T) {
+		testModel := Model{
+			available: []config.AvailableSkill{
+				{ID: "repo/react-toolkit", Name: "React Toolkit", RepoID: "repo"},
+				{ID: "repo/rapid-engineering-and-coding-techniques", Name: "Rapid Engineering and Coding Techniques", RepoID: "repo"},
+			},
+		}
+
+		matches := testModel.matchAvailableSkills("react")
+		require.Len(t, matches, 2)
+		assert.Equal(t, "repo/react-toolkit", matches[0].Skill.ID)
+	})
+
+	t.Run("rank tier dominates field weighting", func(t *testing.T) {
+		testModel := Model{
+			available: []config.AvailableSkill{
+				{ID: "repo/a", Name: "Best UI Patterns", RepoID: "repo"},
+				{ID: "ui/kit", Name: "Toolkit", RepoID: "repo"},
+			},
+		}
+
+		matches := testModel.matchAvailableSkills("ui")
+		require.Len(t, matches, 2)
+		assert.Equal(t, "ui/kit", matches[0].Skill.ID)
+		assert.Equal(t, "repo/a", matches[1].Skill.ID)
+	})
+}
+
+func TestActionSearchUsesRankedMatching(t *testing.T) {
+	m := Model{
+		available: []config.AvailableSkill{
+			{ID: "design/ui-ux", Name: "UI-UX", RepoID: "design"},
+			{ID: "design/user-interface-ux", Name: "User Interface UX", RepoID: "design"},
+		},
+	}
+
+	output := m.actionSearch("ui ux")
+	first := strings.Index(output, "design/ui-ux")
+	second := strings.Index(output, "design/user-interface-ux")
+
+	assert.NotEqual(t, -1, first)
+	assert.NotEqual(t, -1, second)
+	assert.Less(t, first, second)
 }
 
 func TestActionToggleSkillSelection(t *testing.T) {

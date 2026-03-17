@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"akhilsingh.in/skillctl/internal/config"
 	"akhilsingh.in/skillctl/internal/core"
@@ -82,28 +83,9 @@ func (m *Model) actionSearch(query string) string {
 		return warnStyle.Render("Search query cannot be empty.")
 	}
 
-	lower := strings.ToLower(query)
-	var matches []config.AvailableSkill
-	for _, skill := range m.available {
-		if strings.Contains(strings.ToLower(skill.ID), lower) ||
-			strings.Contains(strings.ToLower(skill.Name), lower) ||
-			strings.Contains(strings.ToLower(skill.RepoID), lower) {
-			matches = append(matches, skill)
-		}
-	}
-
+	matches := m.matchAvailableSkills(query)
 	if len(matches) == 0 {
 		return warnStyle.Render("No matching skills found.")
-	}
-
-	selectedSet := make(map[string]bool)
-	for _, s := range m.cfg.SelectedSkills {
-		selectedSet[strings.ToLower(s)] = true
-	}
-
-	catalogIndex := make(map[string]int, len(m.availableIDs))
-	for i, skillID := range m.availableIDs {
-		catalogIndex[strings.ToLower(skillID)] = i + 1
 	}
 
 	var sb strings.Builder
@@ -116,11 +98,10 @@ func (m *Model) actionSearch(query string) string {
 
 	for i := 0; i < limit; i++ {
 		marker := " "
-		if selectedSet[strings.ToLower(matches[i].ID)] {
+		if matches[i].Selected {
 			marker = "*"
 		}
-		idx := catalogIndex[strings.ToLower(matches[i].ID)]
-		sb.WriteString(fmt.Sprintf(" %s %4d. %-48s (%s)\n", marker, idx, matches[i].ID, matches[i].RepoID))
+		sb.WriteString(fmt.Sprintf(" %s %4d. %-48s (%s)\n", marker, matches[i].CatalogIndex, matches[i].Skill.ID, matches[i].Skill.RepoID))
 	}
 	if len(matches) > limit {
 		sb.WriteString(mutedStyle.Render(fmt.Sprintf("... and %d more", len(matches)-limit)))
@@ -213,7 +194,7 @@ func (m *Model) applySkillSelectionChanges(addRequested, removeRequested []strin
 }
 
 func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
-	query := strings.ToLower(strings.TrimSpace(rawQuery))
+	query := buildSearchQuery(rawQuery)
 
 	selectedSet := make(map[string]bool, len(m.cfg.SelectedSkills))
 	for _, skillID := range m.cfg.SelectedSkills {
@@ -228,7 +209,7 @@ func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
 	scored := make([]scoredSkillMatch, 0, len(m.available))
 	for i, skill := range m.available {
 		score := 100
-		if query != "" {
+		if query.raw != "" {
 			computed, ok := scoreSkillSearch(query, skill)
 			if !ok {
 				continue
@@ -246,7 +227,7 @@ func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
 		})
 	}
 
-	if query != "" {
+	if query.raw != "" {
 		sort.SliceStable(scored, func(i, j int) bool {
 			if scored[i].score != scored[j].score {
 				return scored[i].score < scored[j].score
@@ -266,18 +247,32 @@ func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
 	return matches
 }
 
-func scoreSkillSearch(query string, skill config.AvailableSkill) (int, bool) {
+type searchQuery struct {
+	raw        string
+	normalized string
+	compact    string
+}
+
+func buildSearchQuery(raw string) searchQuery {
+	query := strings.ToLower(strings.TrimSpace(raw))
+	return searchQuery{
+		raw:        query,
+		normalized: normalizeSearchText(query),
+		compact:    compactSearchText(query),
+	}
+}
+
+func scoreSkillSearch(query searchQuery, skill config.AvailableSkill) (int, bool) {
 	best := 0
 	hasMatch := false
 
 	consider := func(text string, weight int) {
-		score, ok := scoreFuzzyText(query, strings.ToLower(text))
+		score, ok := scoreSearchText(query, text, weight)
 		if !ok {
 			return
 		}
-		total := score + weight
-		if !hasMatch || total < best {
-			best = total
+		if !hasMatch || score < best {
+			best = score
 			hasMatch = true
 		}
 	}
@@ -289,22 +284,69 @@ func scoreSkillSearch(query string, skill config.AvailableSkill) (int, bool) {
 	return best, hasMatch
 }
 
-func scoreFuzzyText(query, text string) (int, bool) {
-	if query == "" {
-		return 100, true
+func scoreSearchText(query searchQuery, rawText string, fieldWeight int) (int, bool) {
+	if query.raw == "" {
+		return 100 + fieldWeight, true
 	}
+
+	text := strings.ToLower(strings.TrimSpace(rawText))
 	if text == "" {
 		return 0, false
 	}
 
-	if text == query {
+	normalized := normalizeSearchText(text)
+	compact := compactSearchText(text)
+
+	best := 0
+	hasMatch := false
+
+	consider := func(rankTier, detail int) {
+		total := rankTier*10000 + fieldWeight*1000 + detail
+		if !hasMatch || total < best {
+			best = total
+			hasMatch = true
+		}
+	}
+
+	if text == query.raw {
+		consider(0, 0)
+	}
+	if query.normalized != "" && normalized == query.normalized {
+		consider(1, 0)
+	}
+	if query.compact != "" && compact == query.compact {
+		consider(1, 1)
+	}
+
+	if strings.HasPrefix(text, query.raw) {
+		consider(2, len(text)-len(query.raw))
+	}
+	if query.normalized != "" && strings.HasPrefix(normalized, query.normalized) {
+		consider(3, len(normalized)-len(query.normalized))
+	}
+	if query.compact != "" && strings.HasPrefix(compact, query.compact) {
+		consider(3, len(compact)-len(query.compact)+1)
+	}
+
+	if idx := strings.Index(text, query.raw); idx >= 0 {
+		consider(4, idx)
+	}
+
+	if query.compact != "" {
+		if penalty, ok := scoreFuzzySubsequence(query.compact, compact); ok {
+			consider(5, penalty)
+		}
+	}
+
+	return best, hasMatch
+}
+
+func scoreFuzzySubsequence(query, text string) (int, bool) {
+	if query == "" {
 		return 0, true
 	}
-	if strings.HasPrefix(text, query) {
-		return 1, true
-	}
-	if idx := strings.Index(text, query); idx >= 0 {
-		return 2 + idx, true
+	if text == "" {
+		return 0, false
 	}
 
 	qi := 0
@@ -324,7 +366,53 @@ func scoreFuzzyText(query, text string) (int, bool) {
 		return 0, false
 	}
 
-	return 10 + gapPenalty, true
+	spanPenalty := 0
+	if last >= 0 {
+		spanPenalty = len(text) - last - 1
+	}
+
+	return gapPenalty + spanPenalty, true
+}
+
+func normalizeSearchText(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(raw))
+	lastWasSep := true
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastWasSep = false
+			continue
+		}
+		if !lastWasSep {
+			b.WriteByte(' ')
+			lastWasSep = true
+		}
+	}
+
+	return strings.TrimSpace(b.String())
+}
+
+func compactSearchText(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
 }
 
 func (m *Model) actionSync() string {
