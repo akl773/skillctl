@@ -323,21 +323,32 @@ func TestDiscoverImportAgentsExcludesSkillctlManagedSkills(t *testing.T) {
 	t.Setenv("HOME", home)
 	root := filepath.Join(home, ".claude", "skills")
 
-	managedTop := "sickn33-antigravity-awesome-skills--code-reviewer"
-	require.NoError(t, os.MkdirAll(filepath.Join(root, managedTop), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, managedTop, "SKILL.md"), []byte("# managed"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, managedTop, "nested"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, managedTop, "nested", "SKILL.md"), []byte("# nested"), 0o644))
+	managedTop := filepath.Join(root, "sickn33-antigravity-awesome-skills--code-reviewer")
+	require.NoError(t, os.MkdirAll(managedTop, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(managedTop, "SKILL.md"), []byte("# managed"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(managedTop, "nested"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(managedTop, "nested", "SKILL.md"), []byte("# nested"), 0o644))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "code-reviewer"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "code-reviewer", "SKILL.md"), []byte("# legacy"), 0o644))
+	codeReviewer := filepath.Join(root, "code-reviewer")
+	require.NoError(t, os.MkdirAll(codeReviewer, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(codeReviewer, "SKILL.md"), []byte("# legacy"), 0o644))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "custom-unmanaged"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "custom-unmanaged", "SKILL.md"), []byte("# unmanaged"), 0o644))
+	customUnmanaged := filepath.Join(root, "custom-unmanaged")
+	require.NoError(t, os.MkdirAll(customUnmanaged, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(customUnmanaged, "SKILL.md"), []byte("# unmanaged"), 0o644))
 
 	paths := config.ResolvePaths(t.TempDir())
+
+	managedTopHash, err := config.ComputeDirectoryHash(managedTop)
+	require.NoError(t, err)
+	require.NoError(t, config.AddSkillHash(paths, managedTop, managedTopHash, "sickn33-antigravity-awesome-skills/code-reviewer"))
+
+	nestedPath := filepath.Join(managedTop, "nested")
+	nestedHash, err := config.ComputeDirectoryHash(nestedPath)
+	require.NoError(t, err)
+	require.NoError(t, config.AddSkillHash(paths, nestedPath, nestedHash, "sickn33-antigravity-awesome-skills/code-reviewer/nested"))
+
 	m := NewModel(paths)
-	m.cfg.SelectedSkills = []string{"sickn33-antigravity-awesome-skills/code-reviewer"}
 
 	agents := m.discoverImportAgents()
 	require.Len(t, agents, 1)
@@ -349,9 +360,8 @@ func TestDiscoverImportAgentsExcludesSkillctlManagedSkills(t *testing.T) {
 	}
 
 	assert.Contains(t, relatives, "custom-unmanaged")
-	assert.NotContains(t, relatives, managedTop)
-	assert.NotContains(t, relatives, managedTop+"/nested")
-	assert.NotContains(t, relatives, "code-reviewer")
+	assert.NotContains(t, relatives, "sickn33-antigravity-awesome-skills--code-reviewer")
+	assert.NotContains(t, relatives, "sickn33-antigravity-awesome-skills--code-reviewer/nested")
 }
 
 func TestDiscoverImportAgentsFindsCursorSkillsInDefaultRoot(t *testing.T) {
@@ -383,4 +393,158 @@ func TestDiscoverImportAgentsFindsCursorSkillsInDefaultRoot(t *testing.T) {
 		relatives = append(relatives, skill.Relative)
 	}
 	assert.Contains(t, relatives, "custom-cursor")
+}
+
+func TestDiscoverImportAgentsWithHashBasedFiltering(t *testing.T) {
+	t.Run("new skill shows up for import", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		root := filepath.Join(home, ".claude", "skills")
+
+		newSkill := filepath.Join(root, "brand-new-skill")
+		require.NoError(t, os.MkdirAll(newSkill, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(newSkill, "SKILL.md"), []byte("# new skill"), 0o644))
+
+		paths := config.ResolvePaths(t.TempDir())
+		m := NewModel(paths)
+
+		agents := m.discoverImportAgents()
+		require.NotEmpty(t, agents)
+		assert.Equal(t, "claude", agents[0].ID)
+		assert.Contains(t, agents[0].Skills[0].Relative, "brand-new-skill")
+	})
+
+	t.Run("unchanged imported skill not shown as duplicate", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		root := filepath.Join(home, ".claude", "skills")
+
+		localSkill := filepath.Join(root, "my-skill")
+		require.NoError(t, os.MkdirAll(localSkill, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(localSkill, "SKILL.md"), []byte("# my skill"), 0o644))
+
+		paths := config.ResolvePaths(t.TempDir())
+
+		hash, err := config.ComputeDirectoryHash(localSkill)
+		require.NoError(t, err)
+		require.NoError(t, config.AddSkillHash(paths, localSkill, hash, "skillctl-imported/my-skill"))
+
+		m := NewModel(paths)
+		agents := m.discoverImportAgents()
+
+		for _, agent := range agents {
+			for _, skill := range agent.Skills {
+				assert.NotEqual(t, "my-skill", skill.Relative, "Unchanged imported skill should not appear")
+			}
+		}
+	})
+
+	t.Run("modified imported skill shows up for re-import", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		root := filepath.Join(home, ".claude", "skills")
+
+		localSkill := filepath.Join(root, "updated-skill")
+		require.NoError(t, os.MkdirAll(localSkill, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(localSkill, "SKILL.md"), []byte("# original"), 0o644))
+
+		paths := config.ResolvePaths(t.TempDir())
+
+		originalHash, err := config.ComputeDirectoryHash(localSkill)
+		require.NoError(t, err)
+		require.NoError(t, config.AddSkillHash(paths, localSkill, originalHash, "skillctl-imported/updated-skill"))
+
+		require.NoError(t, os.WriteFile(filepath.Join(localSkill, "SKILL.md"), []byte("# modified content"), 0o644))
+
+		m := NewModel(paths)
+		agents := m.discoverImportAgents()
+
+		found := false
+		for _, agent := range agents {
+			for _, skill := range agent.Skills {
+				if skill.Relative == "updated-skill" {
+					found = true
+					break
+				}
+			}
+		}
+		assert.True(t, found, "Modified skill should appear for re-import")
+	})
+
+	t.Run("skill with same name but different content shows up", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		root := filepath.Join(home, ".claude", "skills")
+
+		repoSkill := filepath.Join(root, "sickn33-antigravity-awesome-skills--frontend-design")
+		require.NoError(t, os.MkdirAll(repoSkill, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(repoSkill, "SKILL.md"), []byte("# repo version"), 0o644))
+
+		localSkill := filepath.Join(root, "frontend-design")
+		require.NoError(t, os.MkdirAll(localSkill, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(localSkill, "SKILL.md"), []byte("# local custom version"), 0o644))
+
+		paths := config.ResolvePaths(t.TempDir())
+		m := NewModel(paths)
+		m.cfg.SelectedSkills = []string{"sickn33-antigravity-awesome-skills/frontend-design"}
+
+		agents := m.discoverImportAgents()
+		require.NotEmpty(t, agents)
+
+		foundLocal := false
+		for _, agent := range agents {
+			for _, skill := range agent.Skills {
+				if skill.Relative == "frontend-design" {
+					foundLocal = true
+				}
+			}
+		}
+		assert.True(t, foundLocal, "Local skill with same name as repo skill should appear")
+	})
+
+	t.Run("handles non-existent skill source gracefully", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		paths := config.ResolvePaths(t.TempDir())
+
+		hashStore := config.LoadSkillHashStore(paths)
+		hashStore["/nonexistent/path"] = config.SkillHashRecord{
+			Hash:       "abc123",
+			ImportedAs: "skillctl-imported/test",
+		}
+		require.NoError(t, config.SaveSkillHashStore(paths, hashStore))
+
+		m := NewModel(paths)
+		agents := m.discoverImportAgents()
+
+		assert.Empty(t, agents, "Should handle gracefully with no agent directories")
+	})
+}
+
+func TestImportStoresHashForImportedSkills(t *testing.T) {
+	t.Run("import stores hash record", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		claudeSkillDir := filepath.Join(home, ".claude", "skills", "hash-test-skill")
+		require.NoError(t, os.MkdirAll(claudeSkillDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(claudeSkillDir, "SKILL.md"), []byte("# skill for hashing"), 0o644))
+
+		paths := config.ResolvePaths(t.TempDir())
+		m := NewModel(paths)
+		m.cfg.Targets = []string{filepath.Join(t.TempDir(), "targets")}
+		require.NoError(t, os.MkdirAll(config.ExpandPath(m.cfg.Targets[0]), 0o755))
+		_ = config.SaveConfig(paths, m.cfg)
+
+		m.enterImportAgentPicker()
+		m.enterImportSkillPicker()
+		m.toggleImportSkillSelection()
+		m.applyImportSkillSelections()
+
+		hashStore := config.LoadSkillHashStore(paths)
+		record, exists := hashStore[claudeSkillDir]
+		assert.True(t, exists, "Hash should be stored after import")
+		assert.NotEmpty(t, record.Hash, "Hash should not be empty")
+		assert.Equal(t, "skillctl-imported/hash-test-skill", record.ImportedAs)
+	})
 }

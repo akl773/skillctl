@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,11 +26,12 @@ var defaultRepositoryURLs = []string{
 
 // AppPaths holds all resolved filesystem paths used by the application.
 type AppPaths struct {
-	WorkspaceDir string
-	LocalDir     string
-	ConfigPath   string
-	StatePath    string
-	RepoCacheDir string
+	WorkspaceDir  string
+	LocalDir      string
+	ConfigPath    string
+	StatePath     string
+	RepoCacheDir  string
+	SkillHashPath string
 }
 
 // RepoPath returns the local clone path for a repository id.
@@ -81,6 +83,15 @@ type AvailableSkill struct {
 	SourcePath string
 }
 
+// SkillHashRecord stores the hash and metadata for an imported skill.
+type SkillHashRecord struct {
+	Hash       string `json:"hash"`
+	ImportedAs string `json:"imported_as"`
+}
+
+// SkillHashStore stores content hashes for imported skills, keyed by source path.
+type SkillHashStore map[string]SkillHashRecord
+
 // DefaultConfig returns the factory-default configuration.
 func DefaultConfig() Config {
 	return Config{
@@ -129,11 +140,12 @@ func ResolvePaths(workspaceDir string) AppPaths {
 
 	localDir := filepath.Join(root, ".local")
 	return AppPaths{
-		WorkspaceDir: root,
-		LocalDir:     localDir,
-		ConfigPath:   filepath.Join(localDir, "skillctl.json"),
-		StatePath:    filepath.Join(localDir, "state.json"),
-		RepoCacheDir: filepath.Join(localDir, "repos"),
+		WorkspaceDir:  root,
+		LocalDir:      localDir,
+		ConfigPath:    filepath.Join(localDir, "skillctl.json"),
+		StatePath:     filepath.Join(localDir, "state.json"),
+		RepoCacheDir:  filepath.Join(localDir, "repos"),
+		SkillHashPath: filepath.Join(localDir, "skill-hashes.json"),
 	}
 }
 
@@ -360,6 +372,122 @@ func WriteJSON(path string, data interface{}) error {
 	}
 	b = append(b, '\n')
 	return os.WriteFile(path, b, 0o600)
+}
+
+// --- Skill hash tracking ---
+
+// LoadSkillHashStore loads the skill hash store from disk.
+func LoadSkillHashStore(paths AppPaths) SkillHashStore {
+	var store SkillHashStore
+	if err := ReadJSON(paths.SkillHashPath, &store); err != nil {
+		return make(SkillHashStore)
+	}
+	if store == nil {
+		return make(SkillHashStore)
+	}
+	return store
+}
+
+// SaveSkillHashStore saves the skill hash store to disk.
+func SaveSkillHashStore(paths AppPaths, store SkillHashStore) error {
+	if store == nil {
+		store = make(SkillHashStore)
+	}
+	return WriteJSON(paths.SkillHashPath, store)
+}
+
+// ComputeDirectoryHash computes a SHA256 hash of all files in a directory.
+// Files are sorted by path for deterministic hashing.
+func ComputeDirectoryHash(dirPath string) (string, error) {
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot stat directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("path is not a directory: %s", dirPath)
+	}
+
+	var paths []string
+	err = filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(dirPath, path)
+		if err != nil {
+			return nil
+		}
+		paths = append(paths, relPath)
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("error walking directory: %w", err)
+	}
+
+	sort.Strings(paths)
+
+	hasher := sha256.New()
+	for _, relPath := range paths {
+		fullPath := filepath.Join(dirPath, relPath)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		hasher.Write([]byte(relPath))
+		hasher.Write([]byte{0})
+		hasher.Write(data)
+		hasher.Write([]byte{0})
+	}
+
+	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
+}
+
+// AddSkillHash adds or updates a skill hash record.
+func AddSkillHash(paths AppPaths, sourcePath, hash, importedAs string) error {
+	store := LoadSkillHashStore(paths)
+	store[sourcePath] = SkillHashRecord{
+		Hash:       hash,
+		ImportedAs: importedAs,
+	}
+	return SaveSkillHashStore(paths, store)
+}
+
+// RemoveSkillHash removes a skill hash record.
+func RemoveSkillHash(paths AppPaths, sourcePath string) error {
+	store := LoadSkillHashStore(paths)
+	delete(store, sourcePath)
+	return SaveSkillHashStore(paths, store)
+}
+
+// IsSkillKnown checks if a skill at the given path is already managed.
+// Returns: (isManaged, wasModified)
+func IsSkillKnown(paths AppPaths, dirPath string) (bool, bool) {
+	store := LoadSkillHashStore(paths)
+	record, exists := store[dirPath]
+	if !exists {
+		return false, false
+	}
+
+	currentHash, err := ComputeDirectoryHash(dirPath)
+	if err != nil {
+		return true, false // Exists but can't compute hash, assume unchanged
+	}
+
+	return true, currentHash != record.Hash
+}
+
+// GetManagedSkills returns all managed skill IDs from the hash store.
+func GetManagedSkills(paths AppPaths) map[string]bool {
+	store := LoadSkillHashStore(paths)
+	result := make(map[string]bool)
+	for _, record := range store {
+		if record.ImportedAs != "" {
+			result[record.ImportedAs] = true
+		}
+	}
+	return result
 }
 
 // --- Path helpers ---
