@@ -1033,6 +1033,13 @@ func (m *Model) applyImportSkillSelections() {
 			m.exitImportSkillPicker(true)
 			return
 		}
+
+		hash, hashErr := config.ComputeDirectoryHash(candidate.Source)
+		if hashErr == nil {
+			importedAs := repo.ID + "/" + dirName
+			_ = config.AddSkillHash(m.paths, candidate.Source, hash, importedAs)
+		}
+
 		importedIDs = append(importedIDs, repo.ID+"/"+dirName)
 	}
 
@@ -1672,23 +1679,7 @@ func (m Model) discoverImportAgents() []importAgentOption {
 		{id: "kiro", name: "Kiro", path: "~/.kiro/skills"},
 	}
 
-	managed := make(map[string]bool, len(m.cfg.SelectedSkills))
-	for _, skillID := range m.cfg.SelectedSkills {
-		installDir := strings.ToLower(config.SkillInstallDirName(skillID))
-		if installDir != "" {
-			managed[installDir] = true
-		}
-
-		leaf := selectedSkillLeafName(skillID)
-		if leaf != "" {
-			managed[strings.ToLower(leaf)] = true
-
-			sanitizedLeaf := strings.TrimPrefix(config.SkillInstallDirName("skill/"+leaf), "skill--")
-			if sanitizedLeaf != "" {
-				managed[strings.ToLower(sanitizedLeaf)] = true
-			}
-		}
-	}
+	hashStore := config.LoadSkillHashStore(m.paths)
 
 	agents := make([]importAgentOption, 0, len(agentTargets))
 	for _, agent := range agentTargets {
@@ -1698,7 +1689,7 @@ func (m Model) discoverImportAgents() []importAgentOption {
 			continue
 		}
 
-		skills := discoverUnmanagedSkills(root, managed)
+		skills := discoverUnmanagedSkills(root, hashStore)
 		if len(skills) == 0 {
 			continue
 		}
@@ -1717,7 +1708,7 @@ func (m Model) discoverImportAgents() []importAgentOption {
 	return agents
 }
 
-func discoverUnmanagedSkills(root string, managed map[string]bool) []importSkillCandidate {
+func discoverUnmanagedSkills(root string, hashStore config.SkillHashStore) []importSkillCandidate {
 	candidates := make([]importSkillCandidate, 0)
 	seen := make(map[string]bool)
 
@@ -1751,8 +1742,13 @@ func discoverUnmanagedSkills(root string, managed map[string]bool) []importSkill
 		if topLevel == "" {
 			return nil
 		}
-		if managed[strings.ToLower(topLevel)] {
-			return nil
+
+		record, isManaged := hashStore[skillDir]
+		if isManaged {
+			currentHash, hashErr := config.ComputeDirectoryHash(skillDir)
+			if hashErr == nil && currentHash == record.Hash {
+				return nil
+			}
 		}
 
 		key := strings.ToLower(skillRel)
@@ -1788,17 +1784,6 @@ func hasHiddenSegment(relPath string) bool {
 		}
 	}
 	return false
-}
-
-func selectedSkillLeafName(skillID string) string {
-	skillID = strings.TrimSpace(skillID)
-	if skillID == "" {
-		return ""
-	}
-	if slash := strings.Index(skillID, "/"); slash >= 0 && slash+1 < len(skillID) {
-		return strings.TrimSpace(skillID[slash+1:])
-	}
-	return skillID
 }
 
 func topLevelSegment(relPath string) string {

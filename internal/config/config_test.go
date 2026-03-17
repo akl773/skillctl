@@ -532,3 +532,197 @@ func mustAbs(t *testing.T, p string) string {
 	require.NoError(t, err)
 	return abs
 }
+
+func TestComputeDirectoryHash(t *testing.T) {
+	t.Run("empty directory has consistent hash", func(t *testing.T) {
+		dir := t.TempDir()
+		hash1, err := ComputeDirectoryHash(dir)
+		require.NoError(t, err)
+		hash2, err := ComputeDirectoryHash(dir)
+		require.NoError(t, err)
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("different content produces different hashes", func(t *testing.T) {
+		dir1 := t.TempDir()
+		dir2 := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "file.txt"), []byte("content1"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "file.txt"), []byte("content2"), 0o644))
+
+		hash1, err := ComputeDirectoryHash(dir1)
+		require.NoError(t, err)
+		hash2, err := ComputeDirectoryHash(dir2)
+		require.NoError(t, err)
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("same content produces same hash", func(t *testing.T) {
+		dir1 := t.TempDir()
+		dir2 := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "a.txt"), []byte("hello"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "b.txt"), []byte("world"), 0o644))
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "a.txt"), []byte("hello"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "b.txt"), []byte("world"), 0o644))
+
+		hash1, err := ComputeDirectoryHash(dir1)
+		require.NoError(t, err)
+		hash2, err := ComputeDirectoryHash(dir2)
+		require.NoError(t, err)
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("file order doesn't affect hash", func(t *testing.T) {
+		dir1 := t.TempDir()
+		dir2 := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "a.txt"), []byte("first"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "b.txt"), []byte("second"), 0o644))
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "b.txt"), []byte("second"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "a.txt"), []byte("first"), 0o644))
+
+		hash1, err := ComputeDirectoryHash(dir1)
+		require.NoError(t, err)
+		hash2, err := ComputeDirectoryHash(dir2)
+		require.NoError(t, err)
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("nested directories are included", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub", "nested"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "file.txt"), []byte("sub"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "nested", "deep.txt"), []byte("deep"), 0o644))
+
+		hash, err := ComputeDirectoryHash(dir)
+		require.NoError(t, err)
+		assert.NotEmpty(t, hash)
+	})
+
+	t.Run("error on non-existent path", func(t *testing.T) {
+		_, err := ComputeDirectoryHash("/nonexistent/path")
+		assert.Error(t, err)
+	})
+
+	t.Run("error on file instead of directory", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "file.txt")
+		require.NoError(t, os.WriteFile(file, []byte("content"), 0o644))
+		_, err := ComputeDirectoryHash(file)
+		assert.Error(t, err)
+	})
+}
+
+func TestSkillHashStore(t *testing.T) {
+	t.Run("load returns empty store when file doesn't exist", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		store := LoadSkillHashStore(paths)
+		assert.Empty(t, store)
+	})
+
+	t.Run("save and load round trip", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		store := SkillHashStore{
+			"/path/to/skill": {Hash: "abc123", ImportedAs: "skillctl-imported/my-skill"},
+		}
+
+		require.NoError(t, SaveSkillHashStore(paths, store))
+		loaded := LoadSkillHashStore(paths)
+
+		assert.Equal(t, "abc123", loaded["/path/to/skill"].Hash)
+		assert.Equal(t, "skillctl-imported/my-skill", loaded["/path/to/skill"].ImportedAs)
+	})
+
+	t.Run("add and update hash", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+
+		require.NoError(t, AddSkillHash(paths, "/source/path", "hash1", "skillctl-imported/skill1"))
+
+		store := LoadSkillHashStore(paths)
+		assert.Equal(t, "hash1", store["/source/path"].Hash)
+
+		require.NoError(t, AddSkillHash(paths, "/source/path", "hash2", "skillctl-imported/skill1-updated"))
+
+		store = LoadSkillHashStore(paths)
+		assert.Equal(t, "hash2", store["/source/path"].Hash)
+		assert.Equal(t, "skillctl-imported/skill1-updated", store["/source/path"].ImportedAs)
+	})
+
+	t.Run("remove hash", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+
+		require.NoError(t, AddSkillHash(paths, "/source/path", "hash1", "skillctl-imported/skill1"))
+		require.NoError(t, RemoveSkillHash(paths, "/source/path"))
+
+		store := LoadSkillHashStore(paths)
+		_, exists := store["/source/path"]
+		assert.False(t, exists)
+	})
+}
+
+func TestIsSkillKnown(t *testing.T) {
+	t.Run("returns false for unknown path", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		isManaged, wasModified := IsSkillKnown(paths, "/unknown/path")
+		assert.False(t, isManaged)
+		assert.False(t, wasModified)
+	})
+
+	t.Run("returns true without modification for known path", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Skill"), 0o644))
+
+		hash, err := ComputeDirectoryHash(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, AddSkillHash(paths, dir, hash, "skillctl-imported/my-skill"))
+
+		isManaged, wasModified := IsSkillKnown(paths, dir)
+		assert.True(t, isManaged)
+		assert.False(t, wasModified)
+	})
+
+	t.Run("returns true with modification for changed path", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Original"), 0o644))
+
+		originalHash, err := ComputeDirectoryHash(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, AddSkillHash(paths, dir, originalHash, "skillctl-imported/my-skill"))
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Updated"), 0o644))
+
+		isManaged, wasModified := IsSkillKnown(paths, dir)
+		assert.True(t, isManaged)
+		assert.True(t, wasModified)
+	})
+}
+
+func TestGetManagedSkills(t *testing.T) {
+	t.Run("returns empty map when no skills", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+		managed := GetManagedSkills(paths)
+		assert.Empty(t, managed)
+	})
+
+	t.Run("returns all managed skill IDs", func(t *testing.T) {
+		paths := ResolvePaths(t.TempDir())
+
+		require.NoError(t, AddSkillHash(paths, "/path/1", "hash1", "skillctl-imported/skill-a"))
+		require.NoError(t, AddSkillHash(paths, "/path/2", "hash2", "skillctl-imported/skill-b"))
+		require.NoError(t, AddSkillHash(paths, "/path/3", "hash3", "other-repo/skill-c"))
+
+		managed := GetManagedSkills(paths)
+
+		assert.True(t, managed["skillctl-imported/skill-a"])
+		assert.True(t, managed["skillctl-imported/skill-b"])
+		assert.True(t, managed["other-repo/skill-c"])
+		assert.Len(t, managed, 3)
+	})
+}
