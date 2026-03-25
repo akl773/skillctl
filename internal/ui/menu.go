@@ -23,6 +23,7 @@ const (
 	skillPickerPlaceholder   = "Type to search skills..."
 	importAgentPlaceholder   = "Type to search agents..."
 	importSkillPlaceholder   = "Type to search skills..."
+	listPickerPlaceholder    = "Type to filter selected skills..."
 	repoURLPromptPlaceholder = "Type repository URL and press Enter..."
 	managedImportSourceID    = "skillctl-imported"
 )
@@ -94,6 +95,12 @@ type Model struct {
 	importSkillCursor     int
 	importSkillOffset     int
 	importSkillSelections map[string]bool
+
+	listPickerOpen     bool
+	listMatches        []skillMatch
+	listCursor         int
+	listOffset         int
+	listPickerRemovals map[string]bool
 
 	history      []string
 	historyIndex int
@@ -235,6 +242,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	if m.listPickerOpen {
+		return m.handleListPickerKey(msg)
+	}
 
 	if m.skillPickerOpen {
 		return m.handleSkillPickerKey(msg)
@@ -486,6 +497,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
+		if m.listPickerOpen {
+			m.moveListPicker(-1)
+			return m, nil
+		}
 		if m.skillPickerOpen {
 			m.moveSkillPicker(-1)
 			return m, nil
@@ -506,6 +521,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.chatViewport, cmd = m.chatViewport.Update(msg)
 		return m, cmd
 	case tea.MouseButtonWheelDown:
+		if m.listPickerOpen {
+			m.moveListPicker(1)
+			return m, nil
+		}
 		if m.skillPickerOpen {
 			m.moveSkillPicker(1)
 			return m, nil
@@ -626,6 +645,13 @@ func (m Model) submitRepoURL() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) recomputeMatches() {
+	if m.listPickerOpen {
+		m.matches = nil
+		m.paletteCursor = 0
+		m.recomputeListMatches()
+		return
+	}
+
 	if m.skillPickerOpen {
 		m.matches = nil
 		m.paletteCursor = 0
@@ -716,7 +742,7 @@ func (m Model) paletteOpen() bool {
 }
 
 func (m Model) anyPickerOpen() bool {
-	return m.skillPickerOpen || m.importAgentPickerOpen || m.importSkillPickerOpen
+	return m.skillPickerOpen || m.importAgentPickerOpen || m.importSkillPickerOpen || m.listPickerOpen
 }
 
 func (m *Model) movePalette(delta int) {
@@ -782,6 +808,7 @@ func (m *Model) moveImportSkillPicker(delta int) {
 }
 
 func (m *Model) enterSkillPicker() {
+	m.exitListPicker(true)
 	m.exitImportAgentPicker(true)
 	m.exitImportSkillPicker(true)
 	m.skillPickerOpen = true
@@ -929,6 +956,239 @@ func (m *Model) recomputeSkillMatches() {
 	}
 
 	m.clampSkillWindow()
+}
+
+func (m *Model) enterListPicker() {
+	m.exitSkillPicker(true)
+	m.exitImportAgentPicker(true)
+	m.exitImportSkillPicker(true)
+
+	if len(m.cfg.SelectedSkills) == 0 {
+		m.setOutput("/list", warnStyle.Render("No skills selected yet."))
+		m.applyLayout(true)
+		return
+	}
+
+	m.listPickerOpen = true
+	m.listCursor = 0
+	m.listOffset = 0
+	m.listPickerRemovals = make(map[string]bool)
+	m.commandInput.Placeholder = listPickerPlaceholder
+	m.commandInput.SetValue("")
+	m.commandInput.CursorEnd()
+	m.recomputeListMatches()
+	m.applyLayout(false)
+}
+
+func (m *Model) exitListPicker(clearInput bool) {
+	m.listPickerOpen = false
+	m.listMatches = nil
+	m.listCursor = 0
+	m.listOffset = 0
+	m.listPickerRemovals = nil
+	m.commandInput.Placeholder = defaultInputPlaceholder
+	if clearInput {
+		m.commandInput.SetValue("")
+		m.commandInput.CursorEnd()
+	}
+	m.recomputeMatches()
+	m.applyLayout(false)
+}
+
+func (m Model) handleListPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "enter":
+		m.applyListPickerRemovals()
+		m.historyIndex = len(m.history)
+		m.applyLayout(true)
+		return m, nil
+	case " ", "space":
+		m.toggleListPickerRemoval()
+		m.applyLayout(false)
+		return m, nil
+	case "up":
+		m.moveListPicker(-1)
+		m.applyLayout(false)
+		return m, nil
+	case "down":
+		m.moveListPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "tab":
+		m.moveListPicker(1)
+		m.applyLayout(false)
+		return m, nil
+	case "pgup", "pgdown", "home", "end":
+		var cmd tea.Cmd
+		m.chatViewport, cmd = m.chatViewport.Update(msg)
+		return m, cmd
+	case "esc":
+		m.exitListPicker(true)
+		m.historyIndex = len(m.history)
+		m.applyLayout(false)
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	prev := m.commandInput.Value()
+	m.commandInput, cmd = m.commandInput.Update(msg)
+	if m.commandInput.Value() != prev {
+		m.listCursor = 0
+		m.listOffset = 0
+	}
+	m.recomputeListMatches()
+	m.applyLayout(false)
+	return m, cmd
+}
+
+func (m *Model) moveListPicker(delta int) {
+	if len(m.listMatches) == 0 {
+		return
+	}
+
+	m.listCursor += delta
+	if m.listCursor < 0 {
+		m.listCursor = len(m.listMatches) - 1
+	}
+	if m.listCursor >= len(m.listMatches) {
+		m.listCursor = 0
+	}
+
+	m.clampListWindow()
+}
+
+func (m *Model) clampListWindow() {
+	count := len(m.listMatches)
+	if count == 0 {
+		m.listCursor = 0
+		m.listOffset = 0
+		return
+	}
+
+	if m.listCursor < 0 {
+		m.listCursor = 0
+	}
+	if m.listCursor >= count {
+		m.listCursor = count - 1
+	}
+
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if limit > count {
+		limit = count
+	}
+
+	maxOffset := count - limit
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	if m.listOffset < 0 {
+		m.listOffset = 0
+	}
+	if m.listOffset > maxOffset {
+		m.listOffset = maxOffset
+	}
+
+	if m.listCursor < m.listOffset {
+		m.listOffset = m.listCursor
+	}
+	if m.listCursor >= m.listOffset+limit {
+		m.listOffset = m.listCursor - limit + 1
+	}
+
+	if m.listOffset < 0 {
+		m.listOffset = 0
+	}
+	if m.listOffset > maxOffset {
+		m.listOffset = maxOffset
+	}
+}
+
+func (m Model) visibleListMatches() []skillMatch {
+	limit := m.maxDropdownItems()
+	if limit < 1 {
+		limit = maxPaletteItems
+	}
+	if len(m.listMatches) == 0 {
+		return nil
+	}
+
+	start := m.listOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.listMatches) {
+		start = len(m.listMatches)
+	}
+	end := start + limit
+	if end > len(m.listMatches) {
+		end = len(m.listMatches)
+	}
+
+	return m.listMatches[start:end]
+}
+
+func (m *Model) recomputeListMatches() {
+	m.listMatches = m.matchSelectedSkills(m.commandInput.Value())
+	if len(m.listMatches) == 0 {
+		m.listCursor = 0
+		m.listOffset = 0
+		return
+	}
+
+	m.clampListWindow()
+}
+
+func (m *Model) toggleListPickerRemoval() {
+	if len(m.listMatches) == 0 {
+		return
+	}
+
+	if m.listCursor < 0 || m.listCursor >= len(m.listMatches) {
+		m.listCursor = 0
+	}
+
+	chosen := m.listMatches[m.listCursor]
+	key := strings.ToLower(chosen.Skill.ID)
+	if m.listPickerRemovals[key] {
+		delete(m.listPickerRemovals, key)
+	} else {
+		m.listPickerRemovals[key] = true
+	}
+}
+
+func (m *Model) applyListPickerRemovals() {
+	if len(m.listPickerRemovals) == 0 {
+		m.setOutput("", infoStyle.Render("No selection changes."))
+		m.exitListPicker(true)
+		return
+	}
+
+	selectedByLower := make(map[string]string, len(m.cfg.SelectedSkills))
+	for _, skill := range m.cfg.SelectedSkills {
+		selectedByLower[strings.ToLower(skill)] = skill
+	}
+
+	removeRequested := make([]string, 0, len(m.listPickerRemovals))
+	for lowerID := range m.listPickerRemovals {
+		if resolved, exists := selectedByLower[lowerID]; exists {
+			removeRequested = append(removeRequested, resolved)
+		}
+	}
+
+	sort.Strings(removeRequested)
+
+	output := m.applySkillSelectionChanges(nil, removeRequested)
+	if strings.TrimSpace(output) == "" {
+		output = infoStyle.Render("No selection changes.")
+	}
+	m.setOutput("", output)
+	m.exitListPicker(true)
 }
 
 func (m *Model) recomputeImportAgentMatches() {
@@ -1826,6 +2086,10 @@ func (m *Model) refresh() {
 	m.cfg = config.LoadConfig(m.paths)
 	m.available = config.LoadAvailableSkills(m.paths, m.cfg)
 	m.availableIDs = config.SkillIDs(m.available)
+	if m.listPickerOpen {
+		m.recomputeListMatches()
+		return
+	}
 	if m.skillPickerOpen {
 		m.recomputeSkillMatches()
 		return

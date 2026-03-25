@@ -548,3 +548,91 @@ func TestImportStoresHashForImportedSkills(t *testing.T) {
 		assert.Equal(t, "skillctl-imported/hash-test-skill", record.ImportedAs)
 	})
 }
+
+func TestListPickerWindowScrollsWithCursor(t *testing.T) {
+	matches := make([]skillMatch, 0, 8)
+	for i := 0; i < 8; i++ {
+		matches = append(matches, skillMatch{
+			Skill: config.AvailableSkill{
+				ID: fmt.Sprintf("repo/skill-%d", i+1),
+			},
+			CatalogIndex: i + 1,
+			Selected:     true,
+		})
+	}
+
+	m := Model{
+		listMatches: matches,
+		height:      70,
+	}
+
+	for i := 0; i < 6; i++ {
+		m.moveListPicker(1)
+	}
+
+	assert.Equal(t, 6, m.listCursor)
+	assert.Equal(t, 1, m.listOffset)
+	visible := m.visibleListMatches()
+	assert.Len(t, visible, 6)
+	assert.Equal(t, "repo/skill-2", visible[0].Skill.ID)
+	assert.Equal(t, "repo/skill-7", visible[5].Skill.ID)
+
+	m.moveListPicker(1)
+	assert.Equal(t, 7, m.listCursor)
+	assert.Equal(t, 2, m.listOffset)
+
+	m.moveListPicker(1)
+	assert.Equal(t, 0, m.listCursor)
+	assert.Equal(t, 0, m.listOffset)
+}
+
+func TestToggleListPickerRemovalTracksPendingState(t *testing.T) {
+	m := Model{
+		listMatches: []skillMatch{
+			{Skill: config.AvailableSkill{ID: "repo/alpha"}, Selected: true},
+			{Skill: config.AvailableSkill{ID: "repo/beta"}, Selected: true},
+		},
+		listPickerRemovals: map[string]bool{},
+	}
+
+	m.listCursor = 0
+	m.toggleListPickerRemoval()
+	assert.Equal(t, map[string]bool{"repo/alpha": true}, m.listPickerRemovals)
+
+	m.toggleListPickerRemoval()
+	assert.Empty(t, m.listPickerRemovals)
+}
+
+func TestApplyListPickerRemovalsRemovesSkills(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.cfg = config.Config{SelectedSkills: []string{"repo/alpha", "repo/beta"}}
+	m.available = []config.AvailableSkill{
+		{ID: "repo/alpha", Name: "alpha", RepoID: "repo"},
+		{ID: "repo/beta", Name: "beta", RepoID: "repo"},
+	}
+	m.availableIDs = []string{"repo/alpha", "repo/beta"}
+	m.listPickerOpen = true
+	m.listPickerRemovals = map[string]bool{
+		"repo/alpha": true,
+	}
+
+	m.applyListPickerRemovals()
+
+	assert.False(t, m.listPickerOpen)
+	assert.Equal(t, []string{"repo/beta"}, m.cfg.SelectedSkills)
+	require.NotEmpty(t, m.outputContent)
+	assert.Contains(t, m.outputContent, "Removed from selection:")
+	assert.Contains(t, m.outputContent, "repo/alpha")
+}
+
+func TestEnterListPickerWithNoSelectedSkillsShowsWarning(t *testing.T) {
+	paths := config.ResolvePaths(t.TempDir())
+	m := NewModel(paths)
+	m.cfg = config.Config{SelectedSkills: nil}
+
+	m.enterListPicker()
+
+	assert.False(t, m.listPickerOpen)
+	assert.Contains(t, m.outputContent, "No skills selected yet")
+}

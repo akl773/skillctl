@@ -55,11 +55,12 @@ func builtInCommands() []commandDef {
 		{
 			Name:        "list",
 			Aliases:     []string{"ls"},
-			Description: "List selected skills with status",
+			Description: "Manage selected skills via picker",
 			Usage:       "/list",
 			Examples:    []string{"/list"},
 			Run: func(m *Model, args string) commandResult {
-				return commandResult{Output: m.actionListSelected()}
+				m.enterListPicker()
+				return commandResult{KeepInput: true}
 			},
 		},
 		{
