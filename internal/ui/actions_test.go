@@ -187,6 +187,50 @@ func TestApplySkillSelectionChangesAutoSyncsAfterAdd(t *testing.T) {
 	assert.FileExists(t, installedPath)
 }
 
+func TestMatchSelectedSkills(t *testing.T) {
+	m := Model{
+		cfg: config.Config{
+			SelectedSkills: []string{"repo/alpha", "repo/beta"},
+		},
+		available: []config.AvailableSkill{
+			{ID: "repo/alpha", Name: "Alpha Skill", RepoID: "repo"},
+			{ID: "repo/beta", Name: "Beta Skill", RepoID: "repo"},
+			{ID: "repo/gamma", Name: "Gamma Skill", RepoID: "repo"},
+		},
+	}
+
+	t.Run("returns only selected skills", func(t *testing.T) {
+		matches := m.matchSelectedSkills("")
+		require.Len(t, matches, 2)
+		assert.Equal(t, "repo/alpha", matches[0].Skill.ID)
+		assert.Equal(t, "repo/beta", matches[1].Skill.ID)
+		assert.True(t, matches[0].Selected)
+		assert.True(t, matches[1].Selected)
+		assert.Equal(t, 1, matches[0].CatalogIndex)
+		assert.Equal(t, 2, matches[1].CatalogIndex)
+	})
+
+	t.Run("filters by query", func(t *testing.T) {
+		matches := m.matchSelectedSkills("alpha")
+		require.Len(t, matches, 1)
+		assert.Equal(t, "repo/alpha", matches[0].Skill.ID)
+	})
+
+	t.Run("handles missing skills", func(t *testing.T) {
+		missingModel := Model{
+			cfg: config.Config{
+				SelectedSkills: []string{"repo/missing"},
+			},
+			available: []config.AvailableSkill{},
+		}
+
+		matches := missingModel.matchSelectedSkills("")
+		require.Len(t, matches, 1)
+		assert.Equal(t, "repo/missing", matches[0].Skill.ID)
+		assert.True(t, matches[0].Selected)
+	})
+}
+
 func TestActionAddRepoSkipsSecondSyncWhenPullAlreadyRunning(t *testing.T) {
 	paths := config.ResolvePaths(t.TempDir())
 	m := Model{

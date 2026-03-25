@@ -30,53 +30,6 @@ func (m *Model) actionGitPull() commandResult {
 	return commandResult{Output: m.gitPullOutput.String(), Cmd: startGitPullStreamCmd(m.paths, m.cfg.Repositories)}
 }
 
-func (m *Model) actionListSelected() string {
-	if len(m.cfg.SelectedSkills) == 0 {
-		return warnStyle.Render("No skills selected yet.")
-	}
-
-	availableSet := make(map[string]bool)
-	for _, s := range m.available {
-		availableSet[s.ID] = true
-	}
-
-	disabledSet := make(map[string]bool)
-	for _, s := range m.cfg.DisabledSkills {
-		disabledSet[s] = true
-	}
-
-	var sb strings.Builder
-	sb.WriteString(infoStyle.Render("🧰 Selected") + "\n")
-	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(fmt.Sprintf("%-4s %-40s %-10s %s\n", "#", "Skill", "Mode", "Status"))
-	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-
-	disabledCount := 0
-	for i, skill := range m.cfg.SelectedSkills {
-		status := successStyle.Render("available")
-		if !availableSet[skill] {
-			status = errorStyle.Render("missing")
-		}
-
-		mode := successStyle.Render("enabled")
-		skillLabel := skill
-		if disabledSet[skill] {
-			disabledCount++
-			mode = mutedStyle.Render("disabled")
-			skillLabel = mutedStyle.Render(skill)
-		}
-
-		sb.WriteString(fmt.Sprintf("%-4d %-40s %-10s %s\n", i+1, skillLabel, mode, status))
-	}
-
-	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("📌 total: %d (disabled: %d)", len(m.cfg.SelectedSkills), disabledCount)))
-	sb.WriteString("\n")
-	sb.WriteString(mutedStyle.Render("ℹ️ Use /skills <index|name> to add or remove skills."))
-
-	return sb.String()
-}
-
 func (m *Model) actionSearch(query string) string {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -244,6 +197,61 @@ func (m Model) matchAvailableSkills(rawQuery string) []skillMatch {
 		matches = append(matches, item.match)
 	}
 
+	return matches
+}
+
+func (m Model) matchSelectedSkills(rawQuery string) []skillMatch {
+	query := buildSearchQuery(rawQuery)
+
+	availableByLower := make(map[string]config.AvailableSkill, len(m.available))
+	for _, skill := range m.available {
+		availableByLower[strings.ToLower(skill.ID)] = skill
+	}
+
+	type scoredSkillMatch struct {
+		match skillMatch
+		score int
+	}
+
+	scored := make([]scoredSkillMatch, 0, len(m.cfg.SelectedSkills))
+	for i, skillID := range m.cfg.SelectedSkills {
+		skill, found := availableByLower[strings.ToLower(skillID)]
+		if !found {
+			skill = config.AvailableSkill{ID: skillID}
+		}
+
+		score := 100
+		if query.raw != "" {
+			computed, ok := scoreSkillSearch(query, skill)
+			if !ok {
+				continue
+			}
+			score = computed
+		}
+
+		scored = append(scored, scoredSkillMatch{
+			match: skillMatch{
+				Skill:        skill,
+				CatalogIndex: i + 1,
+				Selected:     true,
+			},
+			score: score,
+		})
+	}
+
+	if query.raw != "" {
+		sort.SliceStable(scored, func(i, j int) bool {
+			if scored[i].score != scored[j].score {
+				return scored[i].score < scored[j].score
+			}
+			return scored[i].match.Skill.Name < scored[j].match.Skill.Name
+		})
+	}
+
+	matches := make([]skillMatch, 0, len(scored))
+	for _, item := range scored {
+		matches = append(matches, item.match)
+	}
 	return matches
 }
 

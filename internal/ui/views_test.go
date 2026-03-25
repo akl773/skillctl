@@ -104,6 +104,40 @@ func TestRenderSkillPickerDropdown(t *testing.T) {
 	})
 }
 
+func TestRenderListPickerDropdown(t *testing.T) {
+	t.Run("shows no matching when empty", func(t *testing.T) {
+		m := Model{listPickerOpen: true}
+		rendered := m.renderListPickerDropdown(80)
+		assert.Contains(t, rendered, "No matching skills")
+	})
+
+	t.Run("shows keep and pending removal entries", func(t *testing.T) {
+		m := Model{
+			listPickerOpen: true,
+			listMatches: []skillMatch{
+				{
+					Skill:        config.AvailableSkill{ID: "repo/alpha", Name: "alpha", RepoID: "repo"},
+					CatalogIndex: 1,
+					Selected:     true,
+				},
+				{
+					Skill:        config.AvailableSkill{ID: "repo/beta", Name: "beta", RepoID: "repo"},
+					CatalogIndex: 2,
+					Selected:     true,
+				},
+			},
+			listPickerRemovals: map[string]bool{"repo/beta": true},
+		}
+
+		rendered := m.renderListPickerDropdown(80)
+		assert.Contains(t, rendered, "alpha")
+		assert.Contains(t, rendered, "beta")
+		assert.Contains(t, rendered, "space toggle")
+		assert.Contains(t, rendered, "[✓]")
+		assert.Contains(t, rendered, "[-]")
+	})
+}
+
 func TestRenderImportPickers(t *testing.T) {
 	agent := importAgentOption{
 		ID:   "claude",
@@ -143,6 +177,10 @@ func TestRenderHelpBar(t *testing.T) {
 	m := Model{width: 100, height: 40}
 	assert.Contains(t, m.renderHelpBar(100), "type / for commands")
 
+	m.listPickerOpen = true
+	assert.Contains(t, m.renderHelpBar(100), "space toggle")
+
+	m.listPickerOpen = false
 	m.skillPickerOpen = true
 	assert.Contains(t, m.renderHelpBar(100), "space toggle")
 

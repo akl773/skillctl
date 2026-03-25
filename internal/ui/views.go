@@ -159,6 +159,8 @@ func (m Model) renderChatWorkspace() string {
 	parts = append(parts, inputRow)
 	if dropdown := m.renderSkillPickerDropdown(innerWidth); dropdown != "" {
 		parts = append(parts, dropdown)
+	} else if dropdown := m.renderListPickerDropdown(innerWidth); dropdown != "" {
+		parts = append(parts, dropdown)
 	} else if dropdown := m.renderImportAgentPickerDropdown(innerWidth); dropdown != "" {
 		parts = append(parts, dropdown)
 	} else if dropdown := m.renderImportSkillPickerDropdown(innerWidth); dropdown != "" {
@@ -399,6 +401,99 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	return dropdownStyle.Width(width).Render(content)
 }
 
+func (m Model) renderListPickerDropdown(width int) string {
+	if !m.listPickerOpen {
+		return ""
+	}
+
+	visible := m.visibleListMatches()
+	displayCount := min(len(visible), m.maxDropdownItems())
+	lineWidth := width - 2
+	if lineWidth < 6 {
+		lineWidth = 6
+	}
+
+	query := strings.TrimSpace(m.commandInput.Value())
+	header := fmt.Sprintf("📋 %d selected skill(s)", len(m.listMatches))
+	if query != "" {
+		header = fmt.Sprintf("📋 %d match(es) for %q", len(m.listMatches), query)
+	}
+
+	lines := make([]string, 0, displayCount+4)
+	lines = append(lines, dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)))
+
+	if displayCount == 0 {
+		lines = append(lines, warnStyle.Render(truncateASCII(" No matching skills.", lineWidth)))
+	} else {
+		for i := 0; i < displayCount; i++ {
+			match := visible[i]
+			absoluteIndex := m.listOffset + i
+
+			indicatorPlain := "[✓]"
+			indicatorStyled := checkboxSelectedStyle.Render(indicatorPlain)
+			if m.listPickerRemovals[strings.ToLower(match.Skill.ID)] {
+				indicatorPlain = "[-]"
+				indicatorStyled = checkboxRemoveStyle.Render(indicatorPlain)
+			}
+
+			prefixPlain := fmt.Sprintf(" %s %4d. ", indicatorPlain, match.CatalogIndex)
+			prefixStyled := fmt.Sprintf(" %s %4d. ", indicatorStyled, match.CatalogIndex)
+			name := skillDisplayName(match.Skill)
+			namespace := skillNamespace(match.Skill)
+
+			nameWidth := lineWidth - len(prefixPlain)
+			if namespace != "" {
+				namespaceWidth := max(10, min(34, lineWidth/3))
+				namespace = truncateASCII(namespace, namespaceWidth)
+				nameWidth = lineWidth - len(prefixPlain) - len(namespace) - 2
+				if nameWidth < 8 {
+					nameWidth = 8
+					namespace = truncateASCII(namespace, max(0, lineWidth-len(prefixPlain)-nameWidth-2))
+				}
+			}
+
+			name = truncateASCII(name, nameWidth)
+			plain := prefixPlain + name
+			styled := prefixStyled + name
+			if namespace != "" {
+				plain += "  " + namespace
+				styled += "  " + mutedStyle.Render(namespace)
+			}
+			plain = truncateASCII(plain, lineWidth)
+			if absoluteIndex == m.listCursor {
+				lines = append(lines, activeItemStyle.Render(plain))
+			} else {
+				lines = append(lines, paletteItemStyle.Render(styled))
+			}
+		}
+
+		above := m.listOffset
+		below := len(m.listMatches) - (m.listOffset + displayCount)
+		if below < 0 {
+			below = 0
+		}
+		if above > 0 || below > 0 {
+			status := ""
+			switch {
+			case above > 0 && below > 0:
+				status = fmt.Sprintf(" ... %d above, %d more", above, below)
+			case above > 0:
+				status = fmt.Sprintf(" ... %d above", above)
+			default:
+				status = fmt.Sprintf(" ... and %d more", below)
+			}
+			lines = append(lines, mutedStyle.Render(truncateASCII(status, lineWidth)))
+		}
+	}
+
+	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  enter confirm  esc cancel", lineWidth)))
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if m.tinyLayout() {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+	return dropdownStyle.Width(width).Render(content)
+}
+
 func (m Model) renderImportAgentPickerDropdown(width int) string {
 	if !m.importAgentPickerOpen {
 		return ""
@@ -509,7 +604,9 @@ func (m Model) renderImportSkillPickerDropdown(width int) string {
 func (m Model) renderHelpBar(width int) string {
 	if m.tinyLayout() {
 		help := "/ commands  enter run  ctrl+c quit"
-		if m.skillPickerOpen {
+		if m.listPickerOpen {
+			help = "up/down move  space toggle  enter confirm"
+		} else if m.skillPickerOpen {
 			help = "up/down move  space toggle  enter confirm"
 		} else if m.importAgentPickerOpen {
 			help = "up/down move  enter select  esc cancel"
@@ -522,7 +619,9 @@ func (m Model) renderHelpBar(width int) string {
 	}
 
 	help := "type / for commands  up/down history  pgup/pgdn scroll  ctrl+c quit"
-	if m.skillPickerOpen {
+	if m.listPickerOpen {
+		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
+	} else if m.skillPickerOpen {
 		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
 	} else if m.importAgentPickerOpen {
 		help = "type to search  up/down navigate  enter continue  esc cancel"
