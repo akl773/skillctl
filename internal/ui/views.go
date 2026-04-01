@@ -397,7 +397,7 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 		}
 	}
 
-	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  enter confirm  esc cancel", lineWidth)))
+	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  d details  enter confirm  esc cancel", lineWidth)))
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if m.tinyLayout() {
 		return lipgloss.NewStyle().Width(width).Render(content)
@@ -634,7 +634,11 @@ func (m Model) renderHelpBar(width int) string {
 		if m.listPickerOpen {
 			help = "up/down move  space toggle  enter confirm"
 		} else if m.skillPickerOpen {
-			help = "up/down move  space toggle  enter confirm"
+			if m.skillDetailOpen {
+				help = "d/esc back  up/down scroll"
+			} else {
+				help = "up/down move  space toggle  d detail  enter confirm"
+			}
 		} else if m.importAgentPickerOpen {
 			help = "up/down move  enter select  esc cancel"
 		} else if m.importSkillPickerOpen {
@@ -649,7 +653,11 @@ func (m Model) renderHelpBar(width int) string {
 	if m.listPickerOpen {
 		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
 	} else if m.skillPickerOpen {
-		help = "type to search  up/down navigate  space toggle  enter confirm  esc cancel"
+		if m.skillDetailOpen {
+			help = "d/esc back to list  up/down scroll detail"
+		} else {
+			help = "type to search  up/down navigate  space toggle  d details  enter confirm  esc cancel"
+		}
 	} else if m.importAgentPickerOpen {
 		help = "type to search  up/down navigate  enter continue  esc cancel"
 	} else if m.importSkillPickerOpen {
