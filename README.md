@@ -25,13 +25,15 @@ Managing skills manually across multiple agents and repositories is repetitive, 
 - **Multi-target sync**: Synchronize selected skills to all agent directories in a single command.
 - **Repository management**: Add, remove, and update source repositories (`/repos`, `/add`, `/pull`).
 - **Target management**: Easily configure agent-specific destination folders (`/targets`).
-- **Local import flow**: Import unmanaged skills into your managed source system.
+- **Skill detail preview**: Press `d` in the skill picker to view rendered SKILL.md documentation with proper markdown formatting (headers, code blocks, lists, etc.) powered by [Glamour](https://github.com/charmbracelet/glamour).
+- **Interactive skill picker**: Keyboard-driven fuzzy picker for browsing, selecting, and previewing skills.
+- **Local import flow**: Import unmanaged skills from other agents into your managed source system.
 - **Background updates**: Repositories are updated on app launch to keep your catalog fresh.
 
 ## Tech Stack
 
 - **Language**: [Go](https://go.dev/) 1.25.8
-- **TUI**: [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lip Gloss](https://github.com/charmbracelet/lipgloss)
+- **TUI**: [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lip Gloss](https://github.com/charmbracelet/lipgloss), [Glamour](https://github.com/charmbracelet/glamour)
 - **Testing**: Go `testing` + [Testify](https://github.com/stretchr/testify)
 - **Tooling**: Make, [GoReleaser](https://goreleaser.com/), GitHub Actions
 - **Dependencies**: `git`, `rsync`
@@ -140,8 +142,21 @@ Interactive slash commands drive the application:
 /skills [index,...]         # Toggle skill selection (e.g., /skills 1,4)
 /sync                       # Apply selections to all agent targets
 /status                     # View workspace health and summary
+/import                     # Import skills from other agents
 /help                       # Show available commands
 ```
+
+### Skill Picker Keybindings
+
+When the skill picker is open:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate skills |
+| `Space` / `Enter` | Toggle skill selection |
+| `d` | Preview skill documentation (rendered markdown) |
+| `d` / `Esc` | Close detail view |
+| `Esc` | Close picker |
 
 ## API / Interface Summary
 
