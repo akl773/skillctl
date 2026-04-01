@@ -276,8 +276,13 @@ if [ "$#" -gt 0 ] && [ "$1" = "clone" ]; then
   exit 0
 fi
 
-if [ "$#" -ge 3 ] && [ "$1" = "-C" ] && [ "$3" = "pull" ]; then
-  printf 'pulled %%s\n' "$2"
+if [ "$#" -ge 3 ] && [ "$1" = "-C" ] && [ "$3" = "fetch" ]; then
+  printf 'fetched %%s\n' "$2"
+  exit 0
+fi
+
+if [ "$#" -ge 3 ] && [ "$1" = "-C" ] && [ "$3" = "reset" ]; then
+  printf 'reset %%s\n' "$2"
   exit 0
 fi
 

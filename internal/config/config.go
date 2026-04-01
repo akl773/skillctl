@@ -11,7 +11,7 @@ import (
 )
 
 // Version is the application version, injected at build time via -ldflags.
-var Version = "0.1.1"
+var Version = "0.1.20"
 
 // DefaultWorkspaceDir is the default workspace path for skillctl metadata.
 var DefaultWorkspaceDir = filepath.Join(homeDir(), ".skillctl")

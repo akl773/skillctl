@@ -153,15 +153,30 @@ func RunGitPullStream(
 				onStdout(fmt.Sprintf("\n[%s] %s\n", repo.ID, strings.ToUpper(action)))
 			}
 
-			var cmd *exec.Cmd
+			var rc int
+			var stdout, stderr string
+
 			if action == "clone" {
 				_ = os.MkdirAll(filepath.Dir(repoPath), 0o755)
-				cmd = exec.Command(gitBinary, "clone", "--depth", "1", "--progress", repo.URL, repoPath)
+				cmd := exec.Command(gitBinary, "clone", "--depth", "1", "--progress", repo.URL, repoPath)
+				rc, stdout, stderr = runCommandStream(cmd, onStdout, onStderr)
 			} else {
-				cmd = exec.Command(gitBinary, "-C", repoPath, "pull", "--ff-only", "--progress")
+				fetchCmd := exec.Command(gitBinary, "-C", repoPath, "fetch", "--depth", "1", "--progress", "origin")
+				fetchRC, fetchOut, fetchErr := runCommandStream(fetchCmd, onStdout, onStderr)
+
+				if fetchRC != 0 {
+					rc = fetchRC
+					stdout = fetchOut
+					stderr = fetchErr
+				} else {
+					resetCmd := exec.Command(gitBinary, "-C", repoPath, "reset", "--hard", "@{u}")
+					resetRC, resetOut, resetErr := runCommandStream(resetCmd, onStdout, onStderr)
+					rc = resetRC
+					stdout = fetchOut + resetOut
+					stderr = fetchErr + resetErr
+				}
 			}
 
-			rc, stdout, stderr := runCommandStream(cmd, onStdout, onStderr)
 			outcome.Results[i] = RepoPullResult{
 				RepoID:       repo.ID,
 				RepoURL:      repo.URL,
