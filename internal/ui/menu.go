@@ -83,6 +83,8 @@ type Model struct {
 	skillCursor           int
 	skillOffset           int
 	skillPickerSelections map[string]bool
+	skillDetailOpen    bool
+	skillDetailContent string
 	awaitingRepoURL       bool
 	importAgentPickerOpen bool
 	importAgentOptions    []importAgentOption
@@ -775,6 +777,24 @@ func (m *Model) moveSkillPicker(delta int) {
 	m.clampSkillWindow()
 }
 
+func (m *Model) openSkillDetail() {
+	if len(m.skillMatches) == 0 {
+		return
+	}
+	if m.skillCursor < 0 || m.skillCursor >= len(m.skillMatches) {
+		return
+	}
+	chosen := m.skillMatches[m.skillCursor]
+	data, err := os.ReadFile(filepath.Join(chosen.Skill.SourcePath, "SKILL.md"))
+	if err != nil {
+		m.skillDetailContent = "Could not read SKILL.md: " + err.Error()
+	} else {
+		m.skillDetailContent = string(data)
+	}
+	m.skillDetailOpen = true
+	m.chatViewport.GotoTop()
+}
+
 func (m *Model) moveImportAgentPicker(delta int) {
 	if len(m.importAgentMatches) == 0 {
 		return
@@ -812,6 +832,8 @@ func (m *Model) enterSkillPicker() {
 	m.exitImportAgentPicker(true)
 	m.exitImportSkillPicker(true)
 	m.skillPickerOpen = true
+	m.skillDetailOpen = false
+	m.skillDetailContent = ""
 	m.skillCursor = 0
 	m.skillOffset = 0
 	m.skillPickerSelections = make(map[string]bool)
@@ -934,6 +956,8 @@ func (m *Model) exitImportSkillPicker(clearInput bool) {
 
 func (m *Model) exitSkillPicker(clearInput bool) {
 	m.skillPickerOpen = false
+	m.skillDetailOpen = false
+	m.skillDetailContent = ""
 	m.skillMatches = nil
 	m.skillCursor = 0
 	m.skillOffset = 0
