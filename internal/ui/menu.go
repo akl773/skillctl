@@ -327,7 +327,32 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.skillDetailOpen {
+		switch key {
+		case "d", "esc", "backspace":
+			m.skillDetailOpen = false
+			m.skillDetailContent = ""
+			m.applyLayout(false)
+			return m, nil
+		case "up":
+			m.chatViewport.LineUp(1)
+			return m, nil
+		case "down", "tab":
+			m.chatViewport.LineDown(1)
+			return m, nil
+		case "pgup", "pgdown", "home", "end":
+			var cmd tea.Cmd
+			m.chatViewport, cmd = m.chatViewport.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	switch key {
+	case "d":
+		m.openSkillDetail()
+		m.applyLayout(false)
+		return m, nil
 	case "enter":
 		m.applySkillPickerSelections()
 		m.historyIndex = len(m.history)
@@ -504,6 +529,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.skillPickerOpen {
+			if m.skillDetailOpen {
+				m.chatViewport.LineUp(1)
+				return m, nil
+			}
 			m.moveSkillPicker(-1)
 			return m, nil
 		}
@@ -528,6 +557,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.skillPickerOpen {
+			if m.skillDetailOpen {
+				m.chatViewport.LineDown(1)
+				return m, nil
+			}
 			m.moveSkillPicker(1)
 			return m, nil
 		}
@@ -1885,7 +1918,11 @@ func (m Model) computeViewportHeight() int {
 		reserved = 6
 	}
 	if m.skillPickerOpen {
-		reserved += len(m.visibleSkillMatches()) + 3
+		if m.skillDetailOpen {
+			reserved += 4 // minimal dropdown: border + header + help + border
+		} else {
+			reserved += len(m.visibleSkillMatches()) + 3
+		}
 	} else if m.importAgentPickerOpen {
 		reserved += len(m.visibleImportAgentMatches()) + 3
 	} else if m.importSkillPickerOpen {
