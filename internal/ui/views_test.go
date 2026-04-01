@@ -299,3 +299,46 @@ func TestRenderChatWorkspaceShowsHighestPriorityDropdown(t *testing.T) {
 	assert.Contains(t, rendered, "match(es) for \"/li\"")
 	assert.NotContains(t, rendered, "usage: /list")
 }
+
+func TestRenderSkillDetailViewportContent(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: "# My Skill\nThis skill does great things.\nLine 3",
+		skillCursor:        0,
+		skillMatches: []skillMatch{{
+			Skill:        config.AvailableSkill{ID: "repo/alpha", Name: "alpha", RepoID: "repo"},
+			CatalogIndex: 1,
+		}},
+		width:  100,
+		height: 70,
+	}
+
+	// Viewport content shows SKILL.md
+	viewportContent := m.renderChatViewportContent(80)
+	assert.Contains(t, viewportContent, "alpha")
+	assert.Contains(t, viewportContent, "My Skill")
+	assert.Contains(t, viewportContent, "great things")
+
+	// Dropdown is minimal with just help
+	dropdown := m.renderSkillPickerDropdown(80)
+	assert.Contains(t, dropdown, "alpha")
+	assert.Contains(t, dropdown, "d/esc back")
+}
+
+func TestRenderSkillPickerDropdownHelpIncludesDHint(t *testing.T) {
+	m := Model{
+		skillPickerOpen: true,
+		skillMatches: []skillMatch{{
+			Skill:        config.AvailableSkill{ID: "repo/alpha", Name: "alpha", RepoID: "repo"},
+			CatalogIndex: 1,
+			Selected:     false,
+		}},
+		skillCursor: 0,
+		width:       100,
+		height:      70,
+	}
+
+	rendered := m.renderSkillPickerDropdown(80)
+	assert.Contains(t, rendered, "d details")
+}

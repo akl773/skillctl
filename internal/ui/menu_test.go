@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -624,6 +625,136 @@ func TestApplyListPickerRemovalsRemovesSkills(t *testing.T) {
 	require.NotEmpty(t, m.outputContent)
 	assert.Contains(t, m.outputContent, "Removed from selection:")
 	assert.Contains(t, m.outputContent, "repo/alpha")
+}
+
+func TestSkillDetailOpenSetsState(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# My Skill\nDoes things."), 0o644))
+
+	m := Model{
+		skillPickerOpen: true,
+		skillMatches: []skillMatch{{
+			Skill: config.AvailableSkill{
+				ID:         "repo/alpha",
+				Name:       "alpha",
+				SourcePath: dir,
+			},
+			CatalogIndex: 1,
+		}},
+		skillCursor: 0,
+		height:      70,
+	}
+
+	m.openSkillDetail()
+
+	assert.True(t, m.skillDetailOpen)
+	assert.Contains(t, m.skillDetailContent, "# My Skill")
+	assert.Contains(t, m.skillDetailContent, "Does things.")
+}
+
+func TestSkillDetailCloseWithDPreservesCursor(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: "content",
+		skillCursor:        2,
+		skillMatches:       make([]skillMatch, 5),
+		height:             70,
+	}
+
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated := result.(Model)
+
+	assert.False(t, updated.skillDetailOpen)
+	assert.Empty(t, updated.skillDetailContent)
+	assert.Equal(t, 2, updated.skillCursor)
+	assert.True(t, updated.skillPickerOpen)
+}
+
+func TestSkillDetailEscReturnsToList(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: "content",
+		height:             70,
+	}
+
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := result.(Model)
+
+	assert.False(t, updated.skillDetailOpen)
+	assert.True(t, updated.skillPickerOpen)
+}
+
+func TestSkillDetailScrollUsesViewport(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: strings.Repeat("line\n", 50),
+		height:             70,
+		chatViewport:       viewport.New(80, 10),
+	}
+	m.chatViewport.SetContent(strings.Repeat("line\n", 50))
+
+	// Down scrolls viewport
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	assert.Greater(t, m.chatViewport.YOffset, 0)
+
+	// Up scrolls viewport back
+	result, _ = m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyUp})
+	m = result.(Model)
+	assert.Equal(t, 0, m.chatViewport.YOffset)
+}
+
+func TestSkillDetailSwallowsSearchKeys(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: "content",
+		height:             70,
+	}
+	m.commandInput.SetValue("test")
+
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated := result.(Model)
+
+	assert.Equal(t, "test", updated.commandInput.Value())
+}
+
+func TestExitSkillPickerClearsDetailState(t *testing.T) {
+	m := Model{
+		skillPickerOpen:    true,
+		skillDetailOpen:    true,
+		skillDetailContent: "content",
+	}
+
+	m.exitSkillPicker(true)
+
+	assert.False(t, m.skillPickerOpen)
+	assert.False(t, m.skillDetailOpen)
+	assert.Empty(t, m.skillDetailContent)
+}
+
+func TestSkillDetailWithMissingSKILLmd(t *testing.T) {
+	m := Model{
+		skillPickerOpen: true,
+		skillMatches: []skillMatch{{
+			Skill: config.AvailableSkill{
+				ID:         "repo/missing",
+				Name:       "missing",
+				SourcePath: "/nonexistent/path",
+			},
+			CatalogIndex: 1,
+		}},
+		skillCursor: 0,
+		height:      70,
+	}
+
+	m.openSkillDetail()
+
+	assert.True(t, m.skillDetailOpen)
+	assert.Contains(t, m.skillDetailContent, "Could not read SKILL.md")
 }
 
 func TestEnterListPickerWithNoSelectedSkillsShowsWarning(t *testing.T) {
