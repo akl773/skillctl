@@ -299,6 +299,10 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 		return ""
 	}
 
+	if m.skillDetailOpen {
+		return m.renderSkillDetailDropdown(width)
+	}
+
 	visible := m.visibleSkillMatches()
 	displayCount := min(len(visible), m.maxDropdownItems())
 	lineWidth := width - 2
@@ -394,6 +398,29 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	}
 
 	lines = append(lines, usageStyle.Render(truncateASCII(" space toggle  enter confirm  esc cancel", lineWidth)))
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if m.tinyLayout() {
+		return lipgloss.NewStyle().Width(width).Render(content)
+	}
+	return dropdownStyle.Width(width).Render(content)
+}
+
+func (m Model) renderSkillDetailDropdown(width int) string {
+	lineWidth := width - 2
+	if lineWidth < 6 {
+		lineWidth = 6
+	}
+
+	skillName := "Skill Details"
+	if m.skillCursor >= 0 && m.skillCursor < len(m.skillMatches) {
+		skillName = skillDisplayName(m.skillMatches[m.skillCursor].Skill)
+	}
+
+	header := fmt.Sprintf("📖 %s", skillName)
+	lines := []string{
+		dropdownHeaderStyle.Render(truncateASCII(header, lineWidth)),
+		usageStyle.Render(truncateASCII(" d/esc back  up/down scroll", lineWidth)),
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if m.tinyLayout() {
 		return lipgloss.NewStyle().Width(width).Render(content)
@@ -637,6 +664,10 @@ func (m Model) renderHelpBar(width int) string {
 }
 
 func (m Model) renderChatViewportContent(width int) string {
+	if m.skillDetailOpen {
+		return m.renderSkillDetailViewportContent(width)
+	}
+
 	if strings.TrimSpace(m.outputLabel) == "" && strings.TrimSpace(m.outputContent) == "" {
 		return m.renderWelcomeState(width)
 	}
@@ -651,6 +682,35 @@ func (m Model) renderChatViewportContent(width int) string {
 		}
 		parts = append(parts, m.renderOutputContent(m.outputContent, width))
 	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+func (m Model) renderSkillDetailViewportContent(width int) string {
+	skillName := "Skill Details"
+	if m.skillCursor >= 0 && m.skillCursor < len(m.skillMatches) {
+		skillName = skillDisplayName(m.skillMatches[m.skillCursor].Skill)
+	}
+
+	header := dropdownHeaderStyle.Render(fmt.Sprintf("📖 %s", skillName))
+
+	if strings.TrimSpace(m.skillDetailContent) == "" {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			header,
+			"",
+			warnStyle.Render("No content available."),
+		)
+	}
+
+	contentLines := strings.Split(m.skillDetailContent, "\n")
+	styled := make([]string, 0, len(contentLines))
+	for _, line := range contentLines {
+		styled = append(styled, mutedStyle.Render(truncateASCII(line, width)))
+	}
+
+	parts := make([]string, 0, len(styled)+2)
+	parts = append(parts, header, "")
+	parts = append(parts, styled...)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
