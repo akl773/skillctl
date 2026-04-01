@@ -822,7 +822,7 @@ func (m *Model) openSkillDetail() {
 	if err != nil {
 		m.skillDetailContent = "Could not read SKILL.md: " + err.Error()
 	} else {
-		m.skillDetailContent = string(data)
+		m.skillDetailContent = m.renderMarkdown(string(data))
 	}
 	m.skillDetailOpen = true
 	m.chatViewport.GotoTop()

@@ -648,7 +648,7 @@ func TestSkillDetailOpenSetsState(t *testing.T) {
 	m.openSkillDetail()
 
 	assert.True(t, m.skillDetailOpen)
-	assert.Contains(t, m.skillDetailContent, "# My Skill")
+	assert.Contains(t, m.skillDetailContent, "My Skill")
 	assert.Contains(t, m.skillDetailContent, "Does things.")
 }
 

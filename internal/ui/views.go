@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
 	"akhilsingh.in/skillctl/internal/config"
@@ -710,17 +711,22 @@ func (m Model) renderSkillDetailViewportContent(width int) string {
 		)
 	}
 
-	contentLines := strings.Split(m.skillDetailContent, "\n")
-	styled := make([]string, 0, len(contentLines))
-	for _, line := range contentLines {
-		styled = append(styled, mutedStyle.Render(truncateASCII(line, width)))
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", m.skillDetailContent)
+}
+
+func (m Model) renderMarkdown(raw string) string {
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(m.contentWidth),
+	)
+	if err != nil {
+		return raw
 	}
-
-	parts := make([]string, 0, len(styled)+2)
-	parts = append(parts, header, "")
-	parts = append(parts, styled...)
-
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	out, err := renderer.Render(raw)
+	if err != nil {
+		return raw
+	}
+	return strings.TrimRight(out, "\n")
 }
 
 func (m Model) renderWelcomeState(width int) string {
