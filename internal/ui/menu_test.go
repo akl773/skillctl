@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -652,7 +653,7 @@ func TestSkillDetailOpenSetsState(t *testing.T) {
 	assert.Contains(t, m.skillDetailContent, "Does things.")
 }
 
-func TestSkillDetailCloseWithDPreservesCursor(t *testing.T) {
+func TestSkillDetailCloseWithShiftDPreservesCursor(t *testing.T) {
 	m := Model{
 		skillPickerOpen:    true,
 		skillDetailOpen:    true,
@@ -662,13 +663,30 @@ func TestSkillDetailCloseWithDPreservesCursor(t *testing.T) {
 		height:             70,
 	}
 
-	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
 	updated := result.(Model)
 
 	assert.False(t, updated.skillDetailOpen)
 	assert.Empty(t, updated.skillDetailContent)
 	assert.Equal(t, 2, updated.skillCursor)
 	assert.True(t, updated.skillPickerOpen)
+}
+
+func TestSkillPickerLowercaseDGoesToFilter(t *testing.T) {
+	ti := textinput.New()
+	ti.Focus()
+	m := Model{
+		skillPickerOpen: true,
+		skillMatches:    []skillMatch{},
+		commandInput:    ti,
+		height:          70,
+	}
+
+	result, _ := m.handleSkillPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated := result.(Model)
+
+	assert.False(t, updated.skillDetailOpen, "lowercase d must not open detail")
+	assert.Equal(t, "d", updated.commandInput.Value(), "lowercase d must be typed into filter")
 }
 
 func TestSkillDetailEscReturnsToList(t *testing.T) {

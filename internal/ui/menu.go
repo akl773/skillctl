@@ -329,7 +329,7 @@ func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.skillDetailOpen {
 		switch key {
-		case "d", "esc", "backspace":
+		case "D", "esc", "backspace":
 			m.skillDetailOpen = false
 			m.skillDetailContent = ""
 			m.applyLayout(false)
@@ -349,7 +349,7 @@ func (m Model) handleSkillPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key {
-	case "d":
+	case "D":
 		m.openSkillDetail()
 		m.applyLayout(false)
 		return m, nil
