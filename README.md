@@ -25,7 +25,7 @@ Managing skills manually across multiple agents and repositories is repetitive, 
 - **Multi-target sync**: Synchronize selected skills to all agent directories in a single command.
 - **Repository management**: Add, remove, and update source repositories (`/repos`, `/add`, `/pull`).
 - **Target management**: Easily configure agent-specific destination folders (`/targets`).
-- **Skill detail preview**: Press `d` in the skill picker to view rendered SKILL.md documentation with proper markdown formatting (headers, code blocks, lists, etc.) powered by [Glamour](https://github.com/charmbracelet/glamour).
+- **Skill detail preview**: Press `Shift+D` in the skill picker to view rendered SKILL.md documentation with proper markdown formatting (headers, code blocks, lists, etc.) powered by [Glamour](https://github.com/charmbracelet/glamour).
 - **Interactive skill picker**: Keyboard-driven fuzzy picker for browsing, selecting, and previewing skills.
 - **Local import flow**: Import unmanaged skills from other agents into your managed source system.
 - **Background updates**: Repositories are updated on app launch to keep your catalog fresh.
@@ -154,8 +154,8 @@ When the skill picker is open:
 |-----|--------|
 | `↑` / `↓` | Navigate skills |
 | `Space` / `Enter` | Toggle skill selection |
-| `d` | Preview skill documentation (rendered markdown) |
-| `d` / `Esc` | Close detail view |
+| `Shift+D` | Preview skill documentation (rendered markdown) |
+| `Shift+D` / `Esc` | Close detail view |
 | `Esc` | Close picker |
 
 ## API / Interface Summary
