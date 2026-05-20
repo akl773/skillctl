@@ -54,7 +54,7 @@ func (m *Model) actionSearch(query string) string {
 		if matches[i].Selected {
 			marker = "*"
 		}
-		sb.WriteString(fmt.Sprintf(" %s %4d. %-48s (%s)\n", marker, matches[i].CatalogIndex, matches[i].Skill.ID, matches[i].Skill.RepoID))
+		fmt.Fprintf(&sb, " %s %4d. %-48s (%s)\n", marker, matches[i].CatalogIndex, matches[i].Skill.ID, matches[i].Skill.RepoID)
 	}
 	if len(matches) > limit {
 		sb.WriteString(mutedStyle.Render(fmt.Sprintf("... and %d more", len(matches)-limit)))
@@ -450,7 +450,7 @@ func (m *Model) actionListTargets() string {
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			status = successStyle.Render(fmt.Sprintf("exists (%d dirs)", countDirs(path)))
 		}
-		sb.WriteString(fmt.Sprintf("%2d. %-54s %s\n", i+1, target, status))
+		fmt.Fprintf(&sb, "%2d. %-54s %s\n", i+1, target, status)
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
@@ -539,12 +539,12 @@ func (m *Model) actionStatus() string {
 	var sb strings.Builder
 	sb.WriteString(infoStyle.Render("Status") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
-	sb.WriteString(fmt.Sprintf("Workspace path   : %s\n", config.CompactPath(m.paths.WorkspaceDir)))
-	sb.WriteString(fmt.Sprintf("Config path      : %s\n", config.CompactPath(m.paths.ConfigPath)))
-	sb.WriteString(fmt.Sprintf("Repositories     : %d\n", len(m.cfg.Repositories)))
-	sb.WriteString(fmt.Sprintf("Catalog skills   : %d\n", len(m.available)))
-	sb.WriteString(fmt.Sprintf("Selected skills  : %d\n", len(m.cfg.SelectedSkills)))
-	sb.WriteString(fmt.Sprintf("Targets          : %d\n", len(m.cfg.Targets)))
+	fmt.Fprintf(&sb, "Workspace path   : %s\n", config.CompactPath(m.paths.WorkspaceDir))
+	fmt.Fprintf(&sb, "Config path      : %s\n", config.CompactPath(m.paths.ConfigPath))
+	fmt.Fprintf(&sb, "Repositories     : %d\n", len(m.cfg.Repositories))
+	fmt.Fprintf(&sb, "Catalog skills   : %d\n", len(m.available))
+	fmt.Fprintf(&sb, "Selected skills  : %d\n", len(m.cfg.SelectedSkills))
+	fmt.Fprintf(&sb, "Targets          : %d\n", len(m.cfg.Targets))
 
 	sb.WriteString(infoStyle.Render("\nRepository overview") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 64)) + "\n")
@@ -560,13 +560,13 @@ func (m *Model) actionStatus() string {
 		} else if info, err := os.Stat(localPath); err == nil && info.IsDir() {
 			status = successStyle.Render("cloned")
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", repo.ID, status))
+		fmt.Fprintf(&sb, "- %s: %s\n", repo.ID, status)
 	}
 
 	if len(missing) > 0 {
 		sb.WriteString(warnStyle.Render("\nSelected but missing in source:") + "\n")
 		for _, s := range missing {
-			sb.WriteString(fmt.Sprintf("  - %s\n", s))
+			fmt.Fprintf(&sb, "  - %s\n", s)
 		}
 	}
 
@@ -581,7 +581,7 @@ func (m *Model) actionStatus() string {
 	for _, target := range m.cfg.Targets {
 		path := config.ExpandPath(target)
 		if _, err := os.Stat(path); err != nil {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", target, warnStyle.Render("missing")))
+			fmt.Fprintf(&sb, "- %s: %s\n", target, warnStyle.Render("missing"))
 			continue
 		}
 
@@ -601,10 +601,10 @@ func (m *Model) actionStatus() string {
 				extras++
 			}
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s | dirs=%d | selected=%d/%d | extras=%d\n",
+		fmt.Fprintf(&sb, "- %s: %s | dirs=%d | selected=%d/%d | extras=%d\n",
 			target,
 			successStyle.Render("exists"),
-			len(dirs), selectedPresent, len(m.cfg.SelectedSkills), extras))
+			len(dirs), selectedPresent, len(m.cfg.SelectedSkills), extras)
 	}
 
 	return sb.String()
@@ -618,7 +618,7 @@ func (m *Model) actionListRepos() string {
 	var sb strings.Builder
 	sb.WriteString(infoStyle.Render("Repositories") + "\n")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
-	sb.WriteString(fmt.Sprintf("%-4s %-26s %-18s %s\n", "#", "ID", "Status", "Source"))
+	fmt.Fprintf(&sb, "%-4s %-26s %-18s %s\n", "#", "ID", "Status", "Source")
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
 
 	for i, repo := range m.cfg.Repositories {
@@ -635,7 +635,7 @@ func (m *Model) actionListRepos() string {
 			status = successStyle.Render("cloned")
 		}
 
-		sb.WriteString(fmt.Sprintf("%-4d %-26s %-18s %s\n", i+1, repo.ID, status, source))
+		fmt.Fprintf(&sb, "%-4d %-26s %-18s %s\n", i+1, repo.ID, status, source)
 	}
 
 	sb.WriteString(mutedStyle.Render(strings.Repeat("-", 88)) + "\n")
@@ -810,14 +810,14 @@ func formatAddOutcome(outcome core.AddOutcome) string {
 	if len(outcome.Added) > 0 {
 		sb.WriteString(successStyle.Render("Added:") + "\n")
 		for _, s := range outcome.Added {
-			sb.WriteString(fmt.Sprintf("  + %s\n", s))
+			fmt.Fprintf(&sb, "  + %s\n", s)
 		}
 	}
 
 	if len(outcome.AlreadySelected) > 0 {
 		sb.WriteString(warnStyle.Render("\nAlready selected:") + "\n")
 		for _, s := range outcome.AlreadySelected {
-			sb.WriteString(fmt.Sprintf("  = %s\n", s))
+			fmt.Fprintf(&sb, "  = %s\n", s)
 		}
 	}
 
@@ -825,9 +825,9 @@ func formatAddOutcome(outcome core.AddOutcome) string {
 		sb.WriteString(errorStyle.Render("\nNot found:") + "\n")
 		for _, missing := range outcome.Missing {
 			if len(missing.Suggestions) > 0 {
-				sb.WriteString(fmt.Sprintf("  ! %s (did you mean: %s)\n", missing.Name, strings.Join(missing.Suggestions, ", ")))
+				fmt.Fprintf(&sb, "  ! %s (did you mean: %s)\n", missing.Name, strings.Join(missing.Suggestions, ", "))
 			} else {
-				sb.WriteString(fmt.Sprintf("  ! %s\n", missing.Name))
+				fmt.Fprintf(&sb, "  ! %s\n", missing.Name)
 			}
 		}
 	}
@@ -841,13 +841,13 @@ func formatRemoveOutcome(outcome core.RemoveOutcome) string {
 	if len(outcome.RemovedFromSelected) > 0 {
 		sb.WriteString(successStyle.Render("Removed from selection:") + "\n")
 		for _, skill := range outcome.RemovedFromSelected {
-			sb.WriteString(fmt.Sprintf("  - %s\n", skill))
+			fmt.Fprintf(&sb, "  - %s\n", skill)
 		}
 
 		if len(outcome.RemovedPaths) > 0 {
 			sb.WriteString(infoStyle.Render("\nRemoved from targets:") + "\n")
 			for _, p := range outcome.RemovedPaths {
-				sb.WriteString(fmt.Sprintf("  - %s\n", p))
+				fmt.Fprintf(&sb, "  - %s\n", p)
 			}
 		}
 		sb.WriteString(successStyle.Render(fmt.Sprintf("\nOK: removed %d target folder(s).", len(outcome.RemovedPaths))))
@@ -867,7 +867,7 @@ func formatMissing(missing []string) string {
 	var sb strings.Builder
 	sb.WriteString(warnStyle.Render("\nSelected but missing in source:") + "\n")
 	for _, s := range missing {
-		sb.WriteString(fmt.Sprintf("  - %s\n", s))
+		fmt.Fprintf(&sb, "  - %s\n", s)
 	}
 	return sb.String()
 }
@@ -886,16 +886,16 @@ func formatSyncOutcome(cfg config.Config, outcome core.SyncOutcome) string {
 		len(cfg.SelectedSkills), len(cfg.Targets))) + "\n")
 
 	for i, result := range outcome.TargetResults {
-		sb.WriteString(fmt.Sprintf("\n%s [%d/%d] %s\n",
+		fmt.Fprintf(&sb, "\n%s [%d/%d] %s\n",
 			infoStyle.Render("Target:"),
 			i+1, len(outcome.TargetResults),
 			config.CompactPath(result.Target),
-		))
+		)
 		for _, skill := range result.Synced {
-			sb.WriteString(fmt.Sprintf("  %s  %s\n", successStyle.Render("+"), skill))
+			fmt.Fprintf(&sb, "  %s  %s\n", successStyle.Render("+"), skill)
 		}
 		for skill, errMsg := range result.Failed {
-			sb.WriteString(fmt.Sprintf("  %s  %s\n", errorStyle.Render("x"), skill))
+			fmt.Fprintf(&sb, "  %s  %s\n", errorStyle.Render("x"), skill)
 			if errMsg != "" {
 				sb.WriteString(mutedStyle.Render(fmt.Sprintf("      %s\n", errMsg)))
 			}
@@ -904,9 +904,9 @@ func formatSyncOutcome(cfg config.Config, outcome core.SyncOutcome) string {
 			len(result.Synced), len(result.Failed))))
 	}
 
-	sb.WriteString(fmt.Sprintf("\n%s  Synced: %d  |  Failed: %d",
+	fmt.Fprintf(&sb, "\n%s  Synced: %d  |  Failed: %d",
 		successStyle.Render("OK"),
-		outcome.TotalSynced(), outcome.TotalFailed()))
+		outcome.TotalSynced(), outcome.TotalFailed())
 
 	if len(outcome.MissingInSource) > 0 {
 		sb.WriteString("\n" + formatMissing(outcome.MissingInSource))

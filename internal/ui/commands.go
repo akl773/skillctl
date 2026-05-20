@@ -224,7 +224,7 @@ func (m Model) renderHelp(raw string) string {
 		sb.WriteString(infoStyle.Render("Slash Commands") + "\n")
 		sb.WriteString(mutedStyle.Render(strings.Repeat("-", 78)) + "\n")
 		for _, cmd := range m.commands {
-			sb.WriteString(fmt.Sprintf("/%-14s %s\n", cmd.Name, cmd.Description))
+			fmt.Fprintf(&sb, "/%-14s %s\n", cmd.Name, cmd.Description)
 		}
 		sb.WriteString(mutedStyle.Render(strings.Repeat("-", 78)) + "\n")
 		sb.WriteString(mutedStyle.Render("Tips: Type / to browse commands, Up/Down to pick, Tab to autocomplete, Enter to run."))
@@ -240,11 +240,11 @@ func (m Model) renderHelp(raw string) string {
 
 	var sb strings.Builder
 	sb.WriteString(infoStyle.Render("Command Details") + "\n")
-	sb.WriteString(fmt.Sprintf("Name        : /%s\n", cmd.Name))
-	sb.WriteString(fmt.Sprintf("Description : %s\n", cmd.Description))
-	sb.WriteString(fmt.Sprintf("Usage       : %s\n", cmd.Usage))
+	fmt.Fprintf(&sb, "Name        : /%s\n", cmd.Name)
+	fmt.Fprintf(&sb, "Description : %s\n", cmd.Description)
+	fmt.Fprintf(&sb, "Usage       : %s\n", cmd.Usage)
 	if len(cmd.Aliases) > 0 {
-		sb.WriteString(fmt.Sprintf("Aliases     : %s\n", strings.Join(cmd.Aliases, ", ")))
+		fmt.Fprintf(&sb, "Aliases     : %s\n", strings.Join(cmd.Aliases, ", "))
 	}
 	if len(cmd.Examples) > 0 {
 		sb.WriteString("Examples    :\n")
