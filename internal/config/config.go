@@ -322,9 +322,9 @@ func SkillIDs(skills []AvailableSkill) []string {
 func SkillInstallDirName(skillID string) string {
 	repoID := "skill"
 	skillName := skillID
-	if slash := strings.Index(skillID, "/"); slash >= 0 {
-		repoID = skillID[:slash]
-		skillName = skillID[slash+1:]
+	if r, s, ok := strings.Cut(skillID, "/"); ok {
+		repoID = r
+		skillName = s
 	}
 
 	repoID = sanitizePathComponent(repoID)
