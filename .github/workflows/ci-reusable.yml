@@ -18,8 +18,34 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run unit tests
-        run: go test ./... -count=1
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20
+        with:
+          version: v2.12.2
+
+      - name: Run unit tests (race + coverage)
+        run: go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
 
       - name: Run go vet
         run: go vet ./...
