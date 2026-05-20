@@ -312,7 +312,7 @@ func (m Model) renderSkillPickerDropdown(width int) string {
 	}
 
 	query := strings.TrimSpace(m.commandInput.Value())
-	header := "🔍 Skills"
+	var header string
 	if query != "" {
 		header = fmt.Sprintf("🔍 %d match(es) for %q", len(m.skillMatches), query)
 	} else {
