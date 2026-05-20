@@ -441,9 +441,12 @@ func closestMatches(name string, candidates []string, n int) []string {
 
 	threshold := typoThreshold(query)
 
-	var ranked []scored
+	ranked := make([]scored, 0, len(candidates))
 	for i, c := range candidates {
 		cLower := strings.ToLower(c)
+		if cLower == "" {
+			continue
+		}
 		switch {
 		case strings.Contains(cLower, query) || strings.Contains(query, cLower):
 			score := 1
@@ -498,6 +501,18 @@ func closestMatches(name string, candidates []string, n int) []string {
 // typo for a given query, scaled to the query length so short queries
 // don't match wildly different candidates while longer queries can
 // absorb several edits.
+//
+// The (len+2)/3 step is a judgment call, not borrowed from a paper. It
+// yields a clean staircase that matches how typos scale in practice:
+//
+//	len 1-3   -> 1 edit  (single substitution / missing char)
+//	len 4-6   -> 2 edits (transposition + adjacent slip)
+//	len 7-9   -> 3 edits
+//	len 10-12 -> 4 edits, and so on.
+//
+// One-third edit-distance is roughly the upper bound at which a string
+// still "looks like" its target to a human reader; tighter than that
+// loses real typos, looser pulls in unrelated candidates.
 func typoThreshold(query string) int {
 	t := (len([]rune(query)) + 2) / 3
 	if t < 1 {
@@ -534,7 +549,7 @@ func levenshtein(a, b string) int {
 			if ar[i-1] == br[j-1] {
 				cost = 0
 			}
-			curr[j] = minInt3(
+			curr[j] = min(
 				prev[j]+1,
 				curr[j-1]+1,
 				prev[j-1]+cost,
@@ -544,17 +559,6 @@ func levenshtein(a, b string) int {
 	}
 
 	return prev[lb]
-}
-
-func minInt3(a, b, c int) int {
-	m := a
-	if b < m {
-		m = b
-	}
-	if c < m {
-		m = c
-	}
-	return m
 }
 
 func exists(path string) bool {

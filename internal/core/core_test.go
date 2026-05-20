@@ -216,6 +216,13 @@ func TestClosestMatches(t *testing.T) {
 			n:          0,
 			want:       nil,
 		},
+		{
+			name:       "empty candidate strings are skipped",
+			query:      "alpha",
+			candidates: []string{"", "alpha", ""},
+			n:          3,
+			want:       []string{"alpha"},
+		},
 	}
 
 	for _, tt := range tests {
