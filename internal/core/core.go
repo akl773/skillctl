@@ -407,19 +407,154 @@ func SyncSelectedSkills(cfg config.Config, available []config.AvailableSkill) Sy
 // --- Internal helpers ---
 
 // closestMatches returns up to n close matches for name from candidates.
-// Uses a simple substring-based approach; could be upgraded to Levenshtein.
+//
+// Ranking is tiered so that high-signal hits surface first:
+//
+//  1. Substring matches in either direction. Exact matches (case-insensitive
+//     equality) rank ahead of other substring matches. Within the tier,
+//     ties are broken by the candidate's position in the input list so the
+//     result remains stable when callers pass a sorted catalog.
+//  2. Typo-tolerant matches by Levenshtein edit distance, gated by a
+//     length-relative threshold so short queries don't pull in unrelated
+//     candidates. Ranked by ascending edit distance, then input position.
 func closestMatches(name string, candidates []string, n int) []string {
-	lower := strings.ToLower(name)
-	var matches []string
-	for _, c := range candidates {
-		if strings.Contains(strings.ToLower(c), lower) || strings.Contains(lower, strings.ToLower(c)) {
-			matches = append(matches, c)
-			if len(matches) >= n {
-				break
+	if n <= 0 || len(candidates) == 0 {
+		return nil
+	}
+
+	query := strings.ToLower(strings.TrimSpace(name))
+	if query == "" {
+		return nil
+	}
+
+	const (
+		tierSubstring = 0
+		tierTypo      = 1
+	)
+
+	type scored struct {
+		value string
+		tier  int
+		score int
+		order int
+	}
+
+	threshold := typoThreshold(query)
+
+	var ranked []scored
+	for i, c := range candidates {
+		cLower := strings.ToLower(c)
+		switch {
+		case strings.Contains(cLower, query) || strings.Contains(query, cLower):
+			score := 1
+			if cLower == query {
+				score = 0
+			}
+			ranked = append(ranked, scored{
+				value: c,
+				tier:  tierSubstring,
+				score: score,
+				order: i,
+			})
+		default:
+			d := levenshtein(query, cLower)
+			if d <= threshold {
+				ranked = append(ranked, scored{
+					value: c,
+					tier:  tierTypo,
+					score: d,
+					order: i,
+				})
 			}
 		}
 	}
-	return matches
+
+	if len(ranked) == 0 {
+		return nil
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].tier != ranked[j].tier {
+			return ranked[i].tier < ranked[j].tier
+		}
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score < ranked[j].score
+		}
+		return ranked[i].order < ranked[j].order
+	})
+
+	if len(ranked) > n {
+		ranked = ranked[:n]
+	}
+
+	out := make([]string, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.value
+	}
+	return out
+}
+
+// typoThreshold returns the maximum Levenshtein distance accepted as a
+// typo for a given query, scaled to the query length so short queries
+// don't match wildly different candidates while longer queries can
+// absorb several edits.
+func typoThreshold(query string) int {
+	t := (len([]rune(query)) + 2) / 3
+	if t < 1 {
+		return 1
+	}
+	return t
+}
+
+// levenshtein returns the edit distance between two strings using a
+// two-row dynamic programming table. Operates on runes so multi-byte
+// characters count as a single edit.
+func levenshtein(a, b string) int {
+	ar := []rune(a)
+	br := []rune(b)
+	la, lb := len(ar), len(br)
+
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			curr[j] = minInt3(
+				prev[j]+1,
+				curr[j-1]+1,
+				prev[j-1]+cost,
+			)
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[lb]
+}
+
+func minInt3(a, b, c int) int {
+	m := a
+	if b < m {
+		m = b
+	}
+	if c < m {
+		m = c
+	}
+	return m
 }
 
 func exists(path string) bool {

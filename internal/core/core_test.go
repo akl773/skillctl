@@ -160,11 +160,91 @@ func TestClosestMatches(t *testing.T) {
 			n:          3,
 			want:       nil,
 		},
+		{
+			name:       "typo within length-relative threshold",
+			query:      "code-revewer",
+			candidates: []string{"code-reviewer", "security-auditor"},
+			n:          3,
+			want:       []string{"code-reviewer"},
+		},
+		{
+			name:       "case-insensitive typo match",
+			query:      "CodeReviwr",
+			candidates: []string{"CodeReviewer", "Unrelated"},
+			n:          3,
+			want:       []string{"CodeReviewer"},
+		},
+		{
+			name:       "exact and substring matches outrank typo matches",
+			query:      "review",
+			candidates: []string{"reviwr", "code-reviewer", "review"},
+			n:          3,
+			want:       []string{"review", "code-reviewer", "reviwr"},
+		},
+		{
+			name:       "exact match wins over other substring matches",
+			query:      "review",
+			candidates: []string{"code-reviewer", "review-helper", "review"},
+			n:          3,
+			want:       []string{"review", "code-reviewer", "review-helper"},
+		},
+		{
+			name:       "typo matches ranked by edit distance",
+			query:      "alpha",
+			candidates: []string{"alpzha", "alpzhx", "alpha"},
+			n:          3,
+			want:       []string{"alpha", "alpzha", "alpzhx"},
+		},
+		{
+			name:       "short query does not over-match on typo distance",
+			query:      "ab",
+			candidates: []string{"xy", "cd"},
+			n:          3,
+			want:       nil,
+		},
+		{
+			name:       "empty query returns nil",
+			query:      "",
+			candidates: []string{"alpha"},
+			n:          3,
+			want:       nil,
+		},
+		{
+			name:       "non-positive n returns nil",
+			query:      "alpha",
+			candidates: []string{"alpha"},
+			n:          0,
+			want:       nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, closestMatches(tt.query, tt.candidates, tt.n))
+		})
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want int
+	}{
+		{name: "identical strings", a: "kitten", b: "kitten", want: 0},
+		{name: "single substitution", a: "kitten", b: "sitten", want: 1},
+		{name: "classic kitten-sitting", a: "kitten", b: "sitting", want: 3},
+		{name: "insertion", a: "abc", b: "abcd", want: 1},
+		{name: "deletion", a: "abcd", b: "abc", want: 1},
+		{name: "empty vs non-empty", a: "", b: "abc", want: 3},
+		{name: "both empty", a: "", b: "", want: 0},
+		{name: "unicode runes count as one edit", a: "café", b: "cafe", want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, levenshtein(tt.a, tt.b))
+			assert.Equal(t, tt.want, levenshtein(tt.b, tt.a), "should be symmetric")
 		})
 	}
 }
