@@ -83,8 +83,8 @@ type Model struct {
 	skillCursor           int
 	skillOffset           int
 	skillPickerSelections map[string]bool
-	skillDetailOpen    bool
-	skillDetailContent string
+	skillDetailOpen       bool
+	skillDetailContent    string
 	awaitingRepoURL       bool
 	importAgentPickerOpen bool
 	importAgentOptions    []importAgentOption
