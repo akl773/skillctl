@@ -1,7 +1,7 @@
 # skillctl
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go](https://img.shields.io/badge/Go-1.25.8-blue.svg)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25.14-blue.svg)](https://go.dev/)
 [![CI](https://github.com/akl773/skillctl/actions/workflows/ci.yml/badge.svg)](https://github.com/akl773/skillctl/actions/workflows/ci.yml)
 
 > skillctl is a terminal application that helps AI agent users aggregate, select, and sync skills from multiple sources into local agent directories using a keyboard-driven TUI.
@@ -32,7 +32,7 @@ Managing skills manually across multiple agents and repositories is repetitive, 
 
 ## Tech Stack
 
-- **Language**: [Go](https://go.dev/) 1.25.8
+- **Language**: [Go](https://go.dev/) 1.25.14
 - **TUI**: [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Bubbles](https://github.com/charmbracelet/bubbles), [Lip Gloss](https://github.com/charmbracelet/lipgloss), [Glamour](https://github.com/charmbracelet/glamour)
 - **Testing**: Go `testing` + [Testify](https://github.com/stretchr/testify)
 - **Tooling**: Make, [GoReleaser](https://goreleaser.com/), GitHub Actions
